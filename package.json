@@ -1,0 +1,36 @@
+{
+  "name": "apply-llm-changes-cli",
+  "version": "1.0.0",
+  "description": "Applies file changes described in LLM output read from stdin.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "apply-llm-changes": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "prepare": "yarn build"
+  },
+  "keywords": [
+    "cli",
+    "llm",
+    "codegen",
+    "automation",
+    "typescript"
+  ],
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
