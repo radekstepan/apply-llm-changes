@@ -102,3 +102,6 @@ dist
 
 # SvelteKit build output
 .svelte-kit
+
+repomix-output.xml
+generated-markdown-parser.cjs

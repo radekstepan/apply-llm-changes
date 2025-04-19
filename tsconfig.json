@@ -1,37 +1,52 @@
-// llm-apply-cli/tsconfig.json
+// tsconfig.json
 {
   "compilerOptions": {
     /* Base Options: */
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "target": "ES2020", // Target modern Node.js versions
-    "allowJs": true,
-    "resolveJsonModule": true,
-    "moduleDetection": "force",
-    "isolatedModules": true,
+    "skipLibCheck": true, // Skips type checking of declaration files (.d.ts) in node_modules
+    "target": "ES2020",   // Target modern Node.js versions
+    "allowJs": true,      // Allow JavaScript files to be compiled
+    "resolveJsonModule": true, // Allow importing .json files
+    "moduleDetection": "force", // Ensures module context even for files without imports/exports
+    "isolatedModules": true,    // Improves build tool compatibility, ensure TS knows modules are separate
 
     /* Strictness */
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitAny": true,
+    "strict": true, // Enable all strict type-checking options
+    "noUncheckedIndexedAccess": true, // Accessing arrays/objects by index might be undefined
+    "noImplicitAny": true, // Require explicit 'any' type
 
-    /* If NOT transpiling packages: */
-    "module": "CommonJS", // Standard Node.js module system
+    /* Module System (for Node.js CLI) */
+    "module": "CommonJS", // Standard Node.js module system for the output
 
     /* Output */
-    "outDir": "./dist", // Output directory for compiled JS
-    "rootDir": "./src", // Source directory for TS files
-    "declaration": true, // Generate .d.ts files
-    "sourceMap": true, // Generate source maps for debugging
+    "outDir": "./dist",       // Output directory for compiled JS
+    "rootDir": "./src",       // Source directory for TS files
+    "declaration": true,      // Generate corresponding '.d.ts' file for types
+    "sourceMap": true,        // Generate '.map' source map files for debugging
 
     /* Module Resolution */
      "baseUrl": ".", // Base directory for non-relative imports (optional)
-     "paths": { // Aliases (optional)
+     "paths": { // Aliases (optional, keep empty unless needed)
       // "@/*": ["./src/*"]
-     }
+     },
 
-    // "lib": ["ES2020"], // Add specific libs if needed
+    /* Type Definitions */
+    // Only include 'node' here. Jest types will be handled by the test runner environment.
+    "types": ["node"]
+
+    // "lib": ["ES2020"], // Usually inferred correctly by 'target'
+    // "typeRoots": ["./node_modules/@types"] // Usually not needed, uncomment only if types aren't found after clean install
   },
-  "include": ["src/**/*.ts"], // Only compile files in the src directory
-  "exclude": ["node_modules", "dist"] // Exclude these directories
+  // Specify exactly which files TS should include in the compilation process for 'yarn build'
+  "include": [
+    "src/**/*.ts" // Compile all .ts files within the src directory
+  ],
+  // Specify files and patterns to *exclude* from the compilation triggered by 'tsc'/'yarn build'
+  "exclude": [
+    "node_modules",       // Always exclude node_modules
+    "dist",               // Exclude the output directory
+    "**/*.test.ts",       // Exclude all files ending in .test.ts
+    "**/__tests__/**/*",  // Exclude all contents within any __tests__ directory
+    "jest.config.js"      // Exclude the Jest configuration file itself
+  ]
 }
