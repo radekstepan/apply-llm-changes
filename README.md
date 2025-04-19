@@ -1,4 +1,3 @@
-/* START OF README.md */
 # Apply LLM Changes CLI (`apply-llm-changes`)
 
 A command-line tool to read structured file modification instructions from Large Language Model (LLM) output (via stdin) and apply them to the local filesystem in the current directory.
