@@ -8,8 +8,7 @@
     "apply-llm-changes": "dist/index.js"
   },
   "scripts": {
-    "build:parser": "peggy src/markdown-blocks.pegjs -o src/generated-markdown-parser.cjs --format commonjs",
-    "build": "yarn build:parser && tsc",
+    "build": "tsc",
     "dev": "ts-node src/index.ts",
     "prepare": "yarn build",
     "start": "node dist/index.js",
@@ -29,15 +28,10 @@
     "dist",
     "README.md"
   ],
-  "dependencies": {
-    "marked": "^12.0.0"
-  },
   "devDependencies": {
     "@types/jest": "^29.5.12",
-    "@types/marked": "^6.0.0",
     "@types/node": "^20.11.24",
     "jest": "^29.7.0",
-    "peggy": "^3.0.2",
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"

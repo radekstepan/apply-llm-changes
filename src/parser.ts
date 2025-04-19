@@ -1,6 +1,3 @@
-// File: src/parser.ts
-
-// Explicit block regexes (unchanged)
 export const explicitCommentBlockRegex = /\/\*\s*START OF\s*(?<path>.*?)\s*\*\/\r?\n?(?<content>.*?)\r?\n?\/\*\s*END OF\s*\1\s*\*\//gs;
 export const explicitTagBlockRegex = /<file\s+(?:path|name|filename)\s*=\s*["'](?<path>.*?)["']\s*>\r?\n?(?<content>.*?)\r?\n?<\/file>/gis;
 
@@ -41,8 +38,8 @@ export function extractExplicitBlocks(
   return remainingInput;
 }
 
-/** 
- * New: Regex-based Markdown‑code‑block extractor. 
+/**
+ * New: Regex-based Markdown‑code‑block extractor.
  * Finds every fenced block and looks one line up for a path.
  */
 export function extractMarkdownBlocksWithPeg(
@@ -50,40 +47,74 @@ export function extractMarkdownBlocksWithPeg(
   filesToWrite: FilesMap
 ): void {
   const formatName = "Markdown Block";
-  // match ````lang\n ... \n```` 
+  // match ````lang\n ... \n````
   const fenceRegex = /```[^\n]*\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
 
   while ((match = fenceRegex.exec(markdownInput)) !== null) {
     const fullFence     = match[0];
-    const codeContent   = match[1];
+    const codeContent   = match[1]; // Capture group 1: can be string or undefined
     const fenceStartIdx = match.index;
+
+    // Defensive check: codeContent should always be a string (possibly empty) if match is not null
+    if (codeContent === undefined) {
+      console.warn(`[${formatName}] Regex match found but code content capture group is undefined.`);
+      continue;
+    }
 
     // Look upward for the last non-blank line before this fence
     const beforeText = markdownInput.slice(0, fenceStartIdx);
     const lines      = beforeText.split(/\r?\n/);
-    // drop any trailing empty lines
-    while (lines.length && lines[lines.length - 1].trim() === "") {
-      lines.pop();
-    }
-    if (!lines.length) continue;
 
+    // drop any trailing empty lines
+    // Use a more robust loop that ensures access is safe
+    while (lines.length > 0) {
+      // Check the last element *after* ensuring lines.length > 0
+      const last = lines[lines.length - 1];
+      // Ensure last is not undefined before calling trim
+      if (last !== undefined && last.trim() === "") {
+        lines.pop();
+      } else {
+        break; // Stop if the last line is not empty or undefined
+      }
+    }
+
+    // If all preceding lines were empty or there were no lines
+    if (!lines.length) {
+        continue;
+    }
+
+    // Now lines.length > 0, so the last element should exist.
     const lastLine = lines[lines.length - 1];
+
+    // Explicit check to satisfy TypeScript's strict null checks, even though
+    // the logic above should prevent `lastLine` from being undefined here.
+    if (lastLine === undefined) {
+        console.warn("[Markdown Parser] Logic error: lastLine unexpectedly undefined.");
+        continue;
+    }
+
     let path: string | null = null;
 
     // 1) Heading style: ## File: foo/bar.ext
+    // lastLine is now confirmed to be a string by the check above
     const h = lastLine.match(/#+\s*(?:File:)?\s*`?(.+?)`?:?$/);
-    if (h) {
+    if (h && h[1] !== undefined) {
+      // Assign result
       path = h[1];
     } else {
       // 2) Inline backticks: ... `foo/bar.ext`...
+      // lastLine is confirmed string
       const inl = lastLine.match(/`([^`]+)`/);
-      if (inl) {
+      if (inl && inl[1] !== undefined) {
+        // Assign result
         path = inl[1];
       } else {
         // 3) Standalone path: exactly foo/bar.ext
+        // lastLine is confirmed string
         const stand = lastLine.match(/^[ \t]*([^\s].+\.[A-Za-z0-9_]+)[ \t]*$/);
-        if (stand) {
+        if (stand && stand[1] !== undefined) {
+          // Assign result
           path = stand[1];
         }
       }
@@ -101,6 +132,7 @@ export function extractMarkdownBlocksWithPeg(
       .replace(/\/+/g, '/');
 
     // Prepare content (strip leading/trailing blank line)
+    // codeContent is guaranteed string here due to the check at the beginning of the loop
     const cleaned = codeContent
       .replace(/^\r?\n/, '')
       .replace(/\r?\n$/, '');
@@ -109,7 +141,7 @@ export function extractMarkdownBlocksWithPeg(
     const existing = filesToWrite.get(normalized);
     if (existing) {
       if (existing.format !== formatName) {
-        console.log(`[${formatName}] Skipping ${normalized} (by ${existing.format})`);
+        console.log(`[${formatName}] Skipping ${normalized} (already defined by ${existing.format})`);
         continue;
       } else {
         console.warn(`[${formatName}] Overwriting Markdown block for ${normalized}`);

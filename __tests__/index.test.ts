@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-// Import the specific functions needed, including the new PEG-based one
 import {
     extractExplicitBlocks,
     extractMarkdownBlocksWithPeg,
