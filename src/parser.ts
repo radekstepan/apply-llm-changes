@@ -1,3 +1,7 @@
+// Import specific token types needed directly
+import { marked, Token, Tokens } from 'marked';
+
+// Keep existing regexes for explicit blocks
 export const explicitCommentBlockRegex = /\/\*\s*START OF\s*(?<path>.*?)\s*\*\/\r?\n?(?<content>.*?)\r?\n?\/\*\s*END OF\s*\1\s*\*\//gs;
 export const explicitTagBlockRegex = /<file\s+(?:path|name|filename)\s*=\s*["'](?<path>.*?)["']\s*>\r?\n?(?<content>.*?)\r?\n?<\/file>/gis;
 
@@ -7,6 +11,7 @@ export type FileData = {
 };
 export type FilesMap = Map<string, FileData>;
 
+// --- extractExplicitBlocks remains the same ---
 export function extractExplicitBlocks(
   input: string,
   regex: RegExp,
@@ -21,8 +26,8 @@ export function extractExplicitBlocks(
     if (filePath && contentMatch !== undefined && fullMatch) {
       const normalizedPath = filePath.replace(/\\/g, '/');
       const content = contentMatch
-        .replace(/^\r?\n/, '')
-        .replace(/\r?\n\s*$/, '');
+        .replace(/^\r?\n/, '') // Remove leading newline only if present
+        .replace(/\r?\n\s*$/, ''); // Remove trailing newline and any trailing whitespace
       if (filesToWrite.has(normalizedPath)) {
         console.warn(`[${formatName}] Overwriting ${normalizedPath}`);
       }
@@ -32,124 +37,165 @@ export function extractExplicitBlocks(
         `\n[LLM_APPLY_Processed ${formatName} for ${normalizedPath}]\n`
       );
     } else {
-      console.warn(`[${formatName}] Failed to parse block.`);
+      console.warn(`[${formatName}] Failed to parse explicit block.`);
     }
   }
   return remainingInput;
 }
 
+
+// --- NEW: Markdown parsing logic using `marked` ---
+
+// Define path patterns to apply to token text
+const pathPatterns = [
+    // ## File: `path/to/file.ext` or ## File: path/to/file.ext (from Heading token)
+    { name: "Heading", regex: /^(?:#+\s*(?:File|Path):?)\s*`?([^`\s].*?)`?:?$/, captureGroup: 1 },
+    // Paragraph containing `path/to/file.ext` potentially with other text
+    // Ensure it captures paths with backslashes correctly from within backticks
+    { name: "Inline Backticks", regex: /`((?:[^`\\]|\\.)+\.[^`\s/\\]+)`/, captureGroup: 1 }, // Adjusted to capture common path chars
+    // Paragraph *exactly* matching a path (from Paragraph token text)
+    { name: "Standalone Path", regex: /^[ \t]*([^\s/?\\*:"<>|]+(?:[\\/][^\s/?\\*:"<>|]+)*\.[A-Za-z0-9_]+)[ \t]*$/, captureGroup: 1 }, // Allow / and \ in standalone, ensure extension
+    // Paragraph starting with File: or Path: (from Paragraph token text)
+    { name: "Explicit Marker", regex: /^(?:File|Path):\s*`?([^`\s].*?)`?:?$/, captureGroup: 1 },
+];
+
+// Helper function to check if a string looks like a plausible path
+function isValidPathCandidate(candidate: string): boolean {
+    if (!candidate) return false;
+    const trimmedCandidate = candidate.trim();
+    if (!trimmedCandidate) return false;
+
+    // Main check: Contains a dot OR a slash (forward or back)
+    const hasPathChars = trimmedCandidate.includes('.') || trimmedCandidate.includes('/') || trimmedCandidate.includes('\\');
+    // Basic length checks
+    const reasonableLength = trimmedCandidate.length > 1 && trimmedCandidate.length < 256;
+    // Avoid matching things that look like URLs accidentally
+    const notUrl = !/^(https?|ftp):\/\//.test(trimmedCandidate);
+    // Avoid matching things that end like sentences (unless it's just the path)
+    const notSentenceEnding = !(/[.,;!?]$/.test(trimmedCandidate) && trimmedCandidate.includes(' '));
+
+    // console.log(`DEBUG isValidPathCandidate: Candidate='${trimmedCandidate}', hasPathChars=${hasPathChars}, reasonableLength=${reasonableLength}, notUrl=${notUrl}, notSentenceEnding=${notSentenceEnding}`);
+    return hasPathChars && reasonableLength && notUrl && notSentenceEnding;
+}
+
+
+// Function to try extracting a path from a text string using defined patterns
+function extractPathFromText(text: string | undefined): string | null {
+    if (!text) return null;
+    // console.log(`DEBUG extractPathFromText: Attempting to extract from: "${text}"`);
+
+    for (const pattern of pathPatterns) {
+        const match = text.match(pattern.regex);
+        if (match) {
+            // console.log(`DEBUG extractPathFromText: Pattern "${pattern.name}" matched.`);
+            const capturedValue = match[pattern.captureGroup];
+            if (typeof capturedValue === 'string' && capturedValue.trim()) {
+                const potentialPath = capturedValue.trim();
+                // console.log(`DEBUG extractPathFromText: Potential path from pattern "${pattern.name}": "${potentialPath}"`);
+                if (isValidPathCandidate(potentialPath)) {
+                    // console.log(`DEBUG extractPathFromText: Path validated: "${potentialPath}"`);
+                    return potentialPath;
+                } else {
+                    // console.log(`DEBUG extractPathFromText: Path "${potentialPath}" failed validation.`);
+                }
+            } else {
+                // console.log(`DEBUG extractPathFromText: Pattern "${pattern.name}" matched, but capture group ${pattern.captureGroup} was invalid:`, capturedValue);
+            }
+        }
+    }
+    // console.log(`DEBUG extractPathFromText: No valid path pattern matched or validated for text: "${text}"`);
+    return null;
+}
+
 /**
- * New: Regex-based Markdown‑code‑block extractor.
- * Finds every fenced block and looks one line up for a path.
+ * Extracts file blocks from Markdown using the `marked` parser.
+ * Looks for code blocks and checks the immediately preceding token
+ * (heading or paragraph), skipping over space tokens.
  */
-export function extractMarkdownBlocksWithPeg(
+export function extractMarkdownBlocksWithParser(
   markdownInput: string,
   filesToWrite: FilesMap
 ): void {
   const formatName = "Markdown Block";
-  // match ````lang\n ... \n````
-  const fenceRegex = /```[^\n]*\n([\s\S]*?)```/g;
-  let match: RegExpExecArray | null;
+  let tokens: Token[];
 
-  while ((match = fenceRegex.exec(markdownInput)) !== null) {
-    const fullFence     = match[0];
-    const codeContent   = match[1]; // Capture group 1: can be string or undefined
-    const fenceStartIdx = match.index;
+  try {
+     tokens = marked.lexer(markdownInput);
+  } catch (error) {
+    console.error(`[${formatName}] Error parsing Markdown:`, error);
+    return;
+  }
 
-    // Defensive check: codeContent should always be a string (possibly empty) if match is not null
-    if (codeContent === undefined) {
-      console.warn(`[${formatName}] Regex match found but code content capture group is undefined.`);
-      continue;
-    }
+  for (let i = 0; i < tokens.length; i++) {
+    const currentToken = tokens[i];
 
-    // Look upward for the last non-blank line before this fence
-    const beforeText = markdownInput.slice(0, fenceStartIdx);
-    const lines      = beforeText.split(/\r?\n/);
+    if (currentToken?.type === 'code') {
+        const codeToken = currentToken as Tokens.Code;
+        const codeContent = codeToken.text ?? '';
 
-    // drop any trailing empty lines
-    // Use a more robust loop that ensures access is safe
-    while (lines.length > 0) {
-      // Check the last element *after* ensuring lines.length > 0
-      const last = lines[lines.length - 1];
-      // Ensure last is not undefined before calling trim
-      if (last !== undefined && last.trim() === "") {
-        lines.pop();
-      } else {
-        break; // Stop if the last line is not empty or undefined
-      }
-    }
+        // --- MODIFIED LOGIC to find preceding token ---
+        let precedingTokenIndex = i - 1;
+        let precedingToken = tokens[precedingTokenIndex];
 
-    // If all preceding lines were empty or there were no lines
-    if (!lines.length) {
-        continue;
-    }
-
-    // Now lines.length > 0, so the last element should exist.
-    const lastLine = lines[lines.length - 1];
-
-    // Explicit check to satisfy TypeScript's strict null checks, even though
-    // the logic above should prevent `lastLine` from being undefined here.
-    if (lastLine === undefined) {
-        console.warn("[Markdown Parser] Logic error: lastLine unexpectedly undefined.");
-        continue;
-    }
-
-    let path: string | null = null;
-
-    // 1) Heading style: ## File: foo/bar.ext
-    // lastLine is now confirmed to be a string by the check above
-    const h = lastLine.match(/#+\s*(?:File:)?\s*`?(.+?)`?:?$/);
-    if (h && h[1] !== undefined) {
-      // Assign result
-      path = h[1];
-    } else {
-      // 2) Inline backticks: ... `foo/bar.ext`...
-      // lastLine is confirmed string
-      const inl = lastLine.match(/`([^`]+)`/);
-      if (inl && inl[1] !== undefined) {
-        // Assign result
-        path = inl[1];
-      } else {
-        // 3) Standalone path: exactly foo/bar.ext
-        // lastLine is confirmed string
-        const stand = lastLine.match(/^[ \t]*([^\s].+\.[A-Za-z0-9_]+)[ \t]*$/);
-        if (stand && stand[1] !== undefined) {
-          // Assign result
-          path = stand[1];
+        // Skip over space tokens if necessary
+        if (precedingToken?.type === 'space') {
+            // console.log(`DEBUG Parser: Skipping space token at index ${precedingTokenIndex}`);
+            precedingTokenIndex = i - 2;
+            precedingToken = tokens[precedingTokenIndex];
         }
-      }
+        // --- END MODIFIED LOGIC ---
+
+
+        let path: string | null = null;
+
+        // Check the potentially adjusted preceding token
+        if (precedingToken) {
+             // console.log(`DEBUG Parser: Checking preceding token at index ${precedingTokenIndex}, type: ${precedingToken.type}, raw: "${precedingToken.raw.substring(0,50)}..."`);
+             if (precedingToken.type === 'heading') {
+                 const textToken = precedingToken as Tokens.Heading;
+                 path = extractPathFromText(textToken.text);
+             } else if (precedingToken.type === 'paragraph') {
+                 const textToken = precedingToken as Tokens.Paragraph;
+                 path = extractPathFromText(textToken.text);
+             }
+             else if (precedingToken.type === 'text') { // Handle simple text nodes too
+                 const textToken = precedingToken as Tokens.Text;
+                 path = extractPathFromText(textToken.text);
+             }
+        } else {
+             // console.log("DEBUG Parser: No valid preceding token found for code block at index", i);
+        }
+
+        if (!path) {
+            // console.log("DEBUG Parser: No path extracted for code block at index", i);
+            continue;
+        }
+        // console.log(`DEBUG Parser: Path extracted: ${path} for code block at index`, i);
+
+
+        // Path Normalization happens here!
+        const normalized = path
+            .trim()
+            .replace(/\\/g, '/') // Convert backslashes *first*
+            .replace(/\/+/g, '/'); // Collapse multiple slashes
+
+        // console.log(`DEBUG Parser: Normalized path: ${normalized}`);
+
+        const cleaned = codeContent.trim();
+
+        const existing = filesToWrite.get(normalized);
+        if (existing) {
+            if (existing.format !== formatName) {
+                console.log(`[${formatName}] Skipping ${normalized} (already defined by ${existing.format})`);
+                continue;
+            } else {
+                console.warn(`[${formatName}] Overwriting Markdown block for ${normalized}`);
+            }
+        } else {
+            console.log(`[${formatName}] Found: ${normalized}`);
+        }
+
+        filesToWrite.set(normalized, { content: cleaned, format: formatName });
     }
-
-    if (!path) {
-      // nothing that looks like a path—skip silently
-      continue;
-    }
-
-    // Normalize: backslashes → slash, collapse duplicates
-    const normalized = path
-      .trim()
-      .replace(/\\/g, '/')
-      .replace(/\/+/g, '/');
-
-    // Prepare content (strip leading/trailing blank line)
-    // codeContent is guaranteed string here due to the check at the beginning of the loop
-    const cleaned = codeContent
-      .replace(/^\r?\n/, '')
-      .replace(/\r?\n$/, '');
-
-    // If we've already seen this file via explicit blocks, skip or overwrite
-    const existing = filesToWrite.get(normalized);
-    if (existing) {
-      if (existing.format !== formatName) {
-        console.log(`[${formatName}] Skipping ${normalized} (already defined by ${existing.format})`);
-        continue;
-      } else {
-        console.warn(`[${formatName}] Overwriting Markdown block for ${normalized}`);
-      }
-    } else {
-      console.log(`[${formatName}] Found: ${normalized}`);
-    }
-
-    filesToWrite.set(normalized, { content: cleaned, format: formatName });
   }
 }

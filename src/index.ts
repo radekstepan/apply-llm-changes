@@ -6,7 +6,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
     extractExplicitBlocks,
-    extractMarkdownBlocksWithPeg,
+    // REMOVE: extractMarkdownBlocksWithPeg,
+    extractMarkdownBlocksWithParser, // ADD THIS IMPORT
     explicitCommentBlockRegex,
     explicitTagBlockRegex,
     type FilesMap,
@@ -70,9 +71,10 @@ async function runCli() {
     console.log("\nSearching for <file path=...> blocks...");
     processedInput = extractExplicitBlocks(processedInput, explicitTagBlockRegex, "Tag Block", filesToWrite);
 
-    // Step 3: Parse Markdown Blocks
+    // Step 3: Parse Markdown Blocks using the new parser
     console.log("\nParsing remaining text for Markdown code blocks...");
-    extractMarkdownBlocksWithPeg(processedInput, filesToWrite);
+    // REPLACE THIS: extractMarkdownBlocksWithPeg(processedInput, filesToWrite);
+    extractMarkdownBlocksWithParser(processedInput, filesToWrite); // USE THE NEW FUNCTION
 
     // Step 4: Write Files
     console.log("\nWriting files...");
@@ -80,7 +82,7 @@ async function runCli() {
     let errors = 0;
     if (filesToWrite.size === 0) {
         console.warn("Warning: No file blocks identified in the input");
-        if (originalInput.includes("```")) console.warn("Hint: Ensure a valid file path (e.g., path/to/file.ts) precedes each code block");
+        if (originalInput.includes("```")) console.warn("Hint: Ensure a valid file path (e.g., path/to/file.ts or ## File: path/...) precedes each code block");
         if (originalInput.includes("START OF")) console.warn("Hint: Verify /* */ comment syntax and spacing");
         if (originalInput.includes("<file")) console.warn("Hint: Check <file path=\"...\"> tag format");
         process.exit(0);
@@ -89,12 +91,23 @@ async function runCli() {
     for (const [relativePath, fileData] of filesToWrite.entries()) {
         let normalizedPath: string;
         try {
+            // Path validation: ensure it's relative and doesn't try to escape the current dir significantly.
+            // Normalize first to handle mixed slashes.
             normalizedPath = path.normalize(relativePath).replace(/\\/g, '/');
-            if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath) || normalizedPath.startsWith('/')) {
-                console.error(`Error: Unsafe or absolute path detected: ${relativePath}`);
+
+            // Basic security checks
+            if (normalizedPath.startsWith('../') || path.isAbsolute(normalizedPath) || normalizedPath.startsWith('/')) {
+                console.error(`Error: Unsafe or absolute path detected and rejected: ${relativePath} (Normalized: ${normalizedPath})`);
                 errors++;
                 continue;
             }
+            // Check for potentially tricky characters (though normalization often helps)
+            if (/[<>:"|?*\x00-\x1F]/g.test(normalizedPath)) {
+                 console.error(`Error: Invalid characters detected in path: ${relativePath} (Normalized: ${normalizedPath})`);
+                 errors++;
+                 continue;
+            }
+
         } catch (normError) {
             console.error(`Error: Invalid path format: ${relativePath}`, normError);
             errors++;
@@ -105,9 +118,10 @@ async function runCli() {
         console.log(`\nProcessing ${normalizedPath} (Detected via: ${fileData.format})`);
         try {
             await ensureDirectoryExists(absolutePath);
-            const contentToWrite = (fileData.content && !/\r?\n$/.test(fileData.content))
+            // Ensure content exists and add trailing newline if missing
+            const contentToWrite = (fileData.content != null && !/\r?\n$/.test(fileData.content))
                 ? fileData.content + '\n'
-                : fileData.content ?? '';
+                : fileData.content ?? ''; // Default to empty string if content is null/undefined
             await fs.writeFile(absolutePath, contentToWrite, 'utf8');
             console.log(`Wrote ${normalizedPath} successfully`);
             filesProcessed++;
@@ -124,8 +138,8 @@ async function runCli() {
         console.error(`Encountered ${errors} error(s). See logs for details`);
         process.exit(1);
     } else if (filesProcessed === 0 && filesToWrite.size > 0) {
-        console.warn("Finished, but no files written due to errors");
-        process.exit(1);
+        console.warn("Finished, but no files written (potentially due to errors or skipping).");
+        process.exit(1); // Exit with error if blocks were found but none written
     } else if (filesProcessed === 0) {
         console.warn("Finished, but no files identified or written");
     } else {
