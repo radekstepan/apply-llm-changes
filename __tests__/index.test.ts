@@ -234,4 +234,20 @@ const code = true;
         expect(result.size).toBe(0);
         logSpy.mockRestore();
     });
+
+    it('parses markdown block with path in header comment', () => {
+        const input = fs.readFileSync(path.join(fixturesDir, 'markdown_header_comment_path.md'), 'utf8');
+        const result = parseInput(input);
+        expect(result.size).toBe(1);
+        const expectedPath = 'src/__tests__/utils/headerCommentUtil.test.ts';
+        expect(result.has(expectedPath)).toBe(true);
+        const fileData = result.get(expectedPath);
+        expect(fileData?.format).toBe('Markdown Block');
+        // Check if the content is correct (excluding the comment block itself if desired, though current logic includes it)
+        expect(fileData?.content).toContain("describe('Header Comment Path Util', () => {");
+        expect(fileData?.content).toContain("expect(true).toBe(true);");
+        // Verify the comment block IS included in the content by default
+        expect(fileData?.content?.trim().startsWith('/*')).toBe(true);
+        expect(fileData?.content?.trim().endsWith('});')).toBe(true); // Check end of code
+    });
 });
