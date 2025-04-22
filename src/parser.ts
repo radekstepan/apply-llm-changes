@@ -1,3 +1,4 @@
+// File: src/parser.ts
 /*
  * src/parser.ts
  * Contains functions to parse input text and extract file blocks
@@ -36,10 +37,12 @@ const listItemPathRegex = /\*\*\s*`([^`\s](?:[^`]*[^`\s])?)`\s*\*\*/;
 
 // Regex patterns to find a path comment on the first line of a code block
 const firstLineCommentPathPatterns = [
-    // Matches // path/to/file or # path/to/file
-    { name: "Single Line Comment", regex: /^\s*(?:\/\/|#)\s*(\S+)\s*$/, captureGroup: 1 },
+    // *** UPDATED Regex to include optional "File:" prefix ***
+    // Matches // path/to/file, # path/to/file, // File: path/to/file, # File: path/to/file
+    { name: "Single Line Comment", regex: /^\s*(?:\/\/|#)\s*(?:File:\s*)?(\S+)\s*$/, captureGroup: 1 },
     // Matches /* path/to/file */ (single line only)
-    { name: "Block Comment Single Line", regex: /^\s*\/\*\s*(\S+)\s*\*\/$/, captureGroup: 1 },
+    // *** UPDATED Regex to include optional "File:" prefix ***
+    { name: "Block Comment Single Line", regex: /^\s*\/\*\s*(?:File:\s*)?(\S+)\s*\*\/$/, captureGroup: 1 },
 ];
 
 
@@ -100,7 +103,7 @@ function isValidPathCandidate(candidate: string | undefined | null): candidate i
         return false;
     }
 
-    // *** UPDATED CHECK: Reject paths attempting directory traversal upwards ***
+    // Reject paths attempting directory traversal upwards
     if (trimmed.startsWith('../') || trimmed.includes('/../') || trimmed.includes('\\..\\')) {
         // console.log(`DEBUG isValidPathCandidate: Rejected traversal path: ${trimmed}`);
         return false;
@@ -203,9 +206,11 @@ function extractPathFromHeaderCommentBlock(codeContent: string): string | null {
     return null;
 }
 
+// Helper to extract path from first line comment
 /**
  * Tries extracting a path from a comment on the *first line* of the code content.
- * Checks for patterns like.
+ * Checks for patterns like '// path/to/file' or '# path/to/file' or '/* path/to/file * /'
+ * including optional 'File: ' prefix.
  * @param codeContent The raw content of the code block.
  * @returns A valid path candidate string or null.
  */
@@ -240,9 +245,9 @@ function extractPathFromFirstLineComment(codeContent: string): string | null {
  * Extracts file blocks from Markdown using the `marked` parser.
  * Looks for code blocks and attempts to find a corresponding file path by checking:
  * 1. The immediately preceding non-space token (heading, paragraph, text).
- * 2. A C-style header comment block
+ * 2. A C-style header comment block at the start of the code.
  * 3. A path in a `**\`path\`**` format within a list item token preceding the code block.
- * 4. A path comment on the first line of the code block itself.
+ * 4. A path comment on the first line of the code block itself (including optional 'File: ' prefix).
  */
 export function extractMarkdownBlocksWithParser(
   markdownInput: string,
@@ -312,7 +317,8 @@ export function extractMarkdownBlocksWithParser(
         // 3. If no path yet, check for List Item Path Format
         if (!path) {
             //  console.log(`DEBUG Parser: No path yet, checking list item format.`);
-            for (let j = i - 1; j >= 0 && j >= i - 5; j--) {
+            // Allow checking further back for list items, potentially skipping other tokens
+            for (let j = i - 1; j >= 0 && j >= i - 5; j--) { // Increased lookback slightly
                  const potentialListItemToken = tokens[j]!; // Assert non-null due to loop condition
                 //  console.log(`DEBUG Parser: Checking token at index ${j} for list item: type=${potentialListItemToken.type}`);
 
@@ -330,16 +336,21 @@ export function extractMarkdownBlocksWithParser(
                              foundBy = 'List Item';
                              precedingPathToken = listItemToken;
                             //  console.log(`DEBUG Parser: Path validated from list item: ${path}`);
-                             break;
+                             break; // Found valid path, stop this inner loop check
                          } else {
                             // console.log(`DEBUG Parser: Path "${potentialPath}" from list item failed validation.`);
                          }
                      }
-                     break; // Found list_item, stop this inner loop check
+                     // Don't 'break' immediately if path wasn't valid; maybe another list item before this one is relevant?
+                     // However, only consider the *first* list item found before the code block for path matching.
+                     // So we do break after checking the first list_item token encountered going backwards.
+                     break;
                  } else if (['space', 'list_start', 'list_end'].includes(potentialListItemToken.type)) {
                      continue; // Skip expected intermediate tokens
                  } else {
-                     break; // Hit something else, stop list item check
+                     // If we hit something that's not a list item or space/list markers,
+                     // assume the list item format isn't applicable here.
+                     break;
                  }
             }
         }
@@ -366,31 +377,36 @@ export function extractMarkdownBlocksWithParser(
             // console.log(`DEBUG Parser: Normalized path: ${normalized}`);
 
             // Use the raw text from the token, trim surrounding whitespace/newlines common in LLM output
-            // For first-line comments, we might want to optionally remove that line from the content
             let cleanedContent = codeContent
                 .replace(/^\s*\r?\n/, '') // Remove leading blank lines/whitespace
                 .replace(/\r?\n\s*$/, ''); // Remove trailing blank lines/whitespace
 
-            // Optional: Remove the first line if it was the source of the path comment
+            // Remove the first line if it was the source of the path comment
             if (foundBy === 'First Line Comment') {
                  const firstLine = cleanedContent.split(/\r?\n/, 1)[0];
-                 // Check if firstLine indeed matches one of the patterns used to extract the path
+                 // Double check if firstLine indeed matches one of the patterns used to extract the path
                  const matchedPattern = firstLineCommentPathPatterns.find(p => firstLine?.trim().match(p.regex));
                  if (firstLine && matchedPattern) {
-                    // Calculate length correctly, including potential leading/trailing whitespace removed by trim() earlier
-                    const originalFirstLineLength = firstLine.length;
                     // Remove the first line and the following newline character(s)
-                    cleanedContent = cleanedContent.substring(originalFirstLineLength).replace(/^\r?\n/, '');
+                    // Calculate the length of the original first line to slice correctly
+                    const originalFirstLineLength = firstLine.length;
+                    cleanedContent = cleanedContent.substring(originalFirstLineLength).replace(/^\r?\n/, ''); // Remove first line + subsequent newline
                  }
             }
 
             const existing = filesToWrite.get(normalized);
             if (existing) {
-                if (existing.format !== formatName) {
+                // Explicit blocks always overwrite Markdown blocks. Allow Markdown blocks to overwrite other Markdown blocks with a warning.
+                if (existing.format !== formatName && existing.format !== 'Comment Block' && existing.format !== 'Tag Block') {
+                     console.warn(`[${formatName}] Overwriting ${normalized} (previously found via ${existing.format} - ${foundBy})`);
+                } else if (existing.format === formatName) {
+                     // Already found by Markdown, log which detection method is winning (usually the last one if multiple apply)
+                     console.warn(`[${formatName}] Overwriting ${normalized} (previously found via Markdown, now using ${foundBy})`);
+                }
+                 else {
+                    // An explicit block (Comment or Tag) already exists, skip this Markdown block
                     console.log(`[${formatName}] Skipping ${normalized} (already defined by ${existing.format})`);
                     continue; // Skip this markdown block
-                } else {
-                    console.warn(`[${formatName}] Overwriting ${normalized} (previously found via ${foundBy})`);
                 }
             } else {
                 console.log(`[${formatName}] Found: ${normalized} (via ${foundBy})`);

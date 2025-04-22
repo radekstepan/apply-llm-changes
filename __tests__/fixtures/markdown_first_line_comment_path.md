@@ -27,6 +27,15 @@ body {
 }
 ```
 
+```tsx
+// File: packages/ui/src/components/SessionView/Transcription/Transcription.tsx
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Session, StructuredTranscript } from '../../../types';
+
+// Component logic here
+```
+
 This block has the comment, but not on the first line:
 
 ```javascript

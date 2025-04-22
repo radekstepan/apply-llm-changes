@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { marked } from 'marked'; // *** ADD THIS IMPORT ***
+import { marked } from 'marked'; // *** Ensure this import is present ***
 import {
     extractExplicitBlocks,
     extractMarkdownBlocksWithParser,
@@ -35,9 +35,8 @@ function expectMultiLineStringEqual(received: string | undefined, expected: stri
 
 
 describe('LLM Apply Changes Parser', () => {
-    // --- TESTS ---
-    // (No changes needed below this line for this specific fix)
-    // ... rest of the test file remains the same ...
+    // --- Existing TESTS remain the same ---
+
     it('parses empty input correctly', () => {
         try {
             // Note: empty.txt doesn't exist, so this test will likely always run the 'catch' block.
@@ -144,7 +143,9 @@ body {
         const result = parseInput(input);
         expect(result.size).toBe(0);
 
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
         expect(errorSpy).not.toHaveBeenCalled();
+
 
         errorSpy.mockRestore();
         warnSpy.mockRestore();
@@ -221,6 +222,7 @@ export const helper = () => true;
 
     it('does NOT extract path if not immediately preceding code block', () => {
         const logSpy = jest.spyOn(console, 'log').mockImplementation();
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
         const input = `
 Some text mentioning \`path/to/some_other_file.js\`.
 
@@ -232,7 +234,9 @@ const code = true;
         `;
         const result = parseInput(input);
         expect(result.size).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
         logSpy.mockRestore();
+        warnSpy.mockRestore();
     });
 
     it('parses markdown block with path in header comment', () => {
@@ -289,6 +293,7 @@ export default ValidComponent;
         `);
 
         // We expect warnings for the 3 code blocks whose paths were skipped or missing
+        // (The two invalid ones, and the final one with no path info)
         expect(warnSpy).toHaveBeenCalledTimes(3);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
 
@@ -300,6 +305,7 @@ export default ValidComponent;
         errorSpy.mockRestore();
     });
 
+    // *** UPDATED TEST CASE for First Line Comment Path ***
     it('parses markdown block with path in first line comment', () => {
         const logSpy = jest.spyOn(console, 'log').mockImplementation();
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
@@ -309,19 +315,23 @@ export default ValidComponent;
         const result = parseInput(input);
 
         // Debugging if test fails
-        if (result.size !== 3) {
+        // *** UPDATED EXPECTED SIZE ***
+        if (result.size !== 4) {
             console.log("DEBUG (first line comment path): Files found:", Array.from(result.keys()));
             const tokens = marked.lexer(input);
-                console.log("DEBUG (first line comment path): Tokens:", JSON.stringify(tokens.map(t => ({type: t.type, text: (t as any).text?.substring(0,50), raw: t.raw.substring(0,50)})), null, 2));
+            console.log("DEBUG (first line comment path): Tokens:", JSON.stringify(tokens.map(t => ({type: t.type, text: (t as any).text?.substring(0,50), raw: t.raw.substring(0,50)})), null, 2));
         }
 
-        expect(result.size).toBe(3); // Expect the 3 valid files
+        // *** UPDATED EXPECTED SIZE ***
+        expect(result.size).toBe(4); // Expect the 4 valid files
 
         const path1 = 'packages/whisper/src/dockerManager.ts';
         const path2 = 'scripts/process_data.py';
         const path3 = 'styles/layout.css';
+        // *** ADDED PATH ***
+        const path4 = 'packages/ui/src/components/SessionView/Transcription/Transcription.tsx';
 
-        // Check file 1 (Typescript, // comment)
+        // Check file 1 (Typescript, // path)
         expect(result.has(path1)).toBe(true);
         const fileData1 = result.get(path1);
         expect(fileData1?.format).toBe('Markdown Block');
@@ -333,7 +343,7 @@ import * as util from 'util';
 // rest of the docker manager code
         `);
 
-        // Check file 2 (Python, # comment)
+        // Check file 2 (Python, # path)
         expect(result.has(path2)).toBe(true);
         const fileData2 = result.get(path2);
         expect(fileData2?.format).toBe('Markdown Block');
@@ -345,22 +355,35 @@ def process():
     print("Processing data...")
         `);
 
-        // Check file 3 (CSS, /* */ comment)
+        // Check file 3 (CSS, /* path */)
         expect(result.has(path3)).toBe(true);
         const fileData3 = result.get(path3);
         expect(fileData3?.format).toBe('Markdown Block');
         expect(fileData3?.content).not.toContain('/* styles/layout.css */'); // Check if comment was removed
         expectMultiLineStringEqual(fileData3?.content, `
 body {
-    display: flex;
+  display: flex;
 }
+        `);
+
+        // *** ADDED CHECK for file 4 (Typescript, // File: path) ***
+        expect(result.has(path4)).toBe(true);
+        const fileData4 = result.get(path4);
+        expect(fileData4?.format).toBe('Markdown Block');
+        expect(fileData4?.content).not.toContain('// File: packages/ui/src/components/SessionView/Transcription/Transcription.tsx'); // Check if comment was removed
+        expectMultiLineStringEqual(fileData4?.content, `
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Session, StructuredTranscript } from '../../../types';
+
+// Component logic here
         `);
 
         // Ensure the blocks with comments not on first line or invalid paths were skipped
         expect(result.has('src/config.js')).toBe(false);
-        expect(result.has('../../etc/passwd')).toBe(false);
+        expect(result.has('../../etc/passwd')).toBe(false); // Invalid path check
 
-        // Expect warnings for the 2 skipped/unidentified blocks
+        // Expect warnings for the 2 skipped/unidentified blocks (count remains 2)
         expect(warnSpy).toHaveBeenCalledTimes(2);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
 
