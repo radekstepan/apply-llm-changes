@@ -37,6 +37,8 @@ const firstLineCommentPathPatterns = [
     { name: "Single Line Comment", regex: /^\s*(?:\/\/|#)\s*(?:File:\s*)?(\S+)\s*$/, captureGroup: 1 },
     // Matches /* path/to/file */ (single line only)
     { name: "Block Comment Single Line", regex: /^\s*\/\*\s*(?:File:\s*)?(\S+)\s*\*\/$/, captureGroup: 1 },
+    // Matches // filepath: path/to/file or # filepath: path/to/file
+    { name: "Filepath Marker", regex: /^\s*(?:\/\/|#)\s*filepath:\s*(\S+)\s*$/, captureGroup: 1 },
 ];
 
 // *** ADDED: Regex for YAML Front Matter-like path block ***
