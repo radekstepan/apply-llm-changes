@@ -31,9 +31,16 @@ const pathPatterns = [
     { name: "Explicit Marker", regex: /^(?:File|Path):\s*`?([^`\s].*?)`?:?$/, captureGroup: 1 },
 ];
 
-// Regex for the new format: **`path/to/file.ext`** within a list item
-// Captures the path inside the backticks. Allows spaces in path if needed.
+// Regex for the format: **`path/to/file.ext`** within a list item
 const listItemPathRegex = /\*\*\s*`([^`\s](?:[^`]*[^`\s])?)`\s*\*\*/;
+
+// Regex patterns to find a path comment on the first line of a code block
+const firstLineCommentPathPatterns = [
+    // Matches // path/to/file or # path/to/file
+    { name: "Single Line Comment", regex: /^\s*(?:\/\/|#)\s*(\S+)\s*$/, captureGroup: 1 },
+    // Matches /* path/to/file */ (single line only)
+    { name: "Block Comment Single Line", regex: /^\s*\/\*\s*(\S+)\s*\*\/$/, captureGroup: 1 },
+];
 
 
 // --- Types ---
@@ -80,7 +87,7 @@ export function extractExplicitBlocks(
 
 /**
  * Checks if a string is a plausible relative file path candidate.
- * Focuses on structure rather than OS validity.
+ * Focuses on structure and basic safety rather than OS validity.
  */
 function isValidPathCandidate(candidate: string | undefined | null): candidate is string {
     if (!candidate) return false;
@@ -88,22 +95,49 @@ function isValidPathCandidate(candidate: string | undefined | null): candidate i
     if (!trimmed || trimmed.length < 3 || trimmed.length > 255) return false; // Basic length check
 
     // Reject absolute paths (simplistic check)
-    if (trimmed.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(trimmed)) return false;
+    if (trimmed.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(trimmed)) {
+        // console.log(`DEBUG isValidPathCandidate: Rejected absolute path: ${trimmed}`);
+        return false;
+    }
+
+    // *** UPDATED CHECK: Reject paths attempting directory traversal upwards ***
+    if (trimmed.startsWith('../') || trimmed.includes('/../') || trimmed.includes('\\..\\')) {
+        // console.log(`DEBUG isValidPathCandidate: Rejected traversal path: ${trimmed}`);
+        return false;
+    }
 
     // Avoid matching URLs
-    if (/^(https?|ftp):\/\//i.test(trimmed)) return false;
+    if (/^(https?|ftp):\/\//i.test(trimmed)) {
+         // console.log(`DEBUG isValidPathCandidate: Rejected URL: ${trimmed}`);
+        return false;
+    }
 
     // Must contain at least one slash (forward or back) OR a dot (suggesting extension/relative)
+    // This helps filter out random words that might accidentally match other patterns.
     const hasPathChars = /[\\/.]/.test(trimmed);
+    if (!hasPathChars) {
+        // console.log(`DEBUG isValidPathCandidate: Rejected - no path chars: ${trimmed}`);
+        return false;
+    }
+
 
     // Avoid common sentence endings if it contains spaces (less likely to be just a path)
     const notLikelySentence = !(/[.,;!?]$/.test(trimmed) && trimmed.includes(' '));
+    if (!notLikelySentence) {
+    //    console.log(`DEBUG isValidPathCandidate: Rejected likely sentence: ${trimmed}`);
+       return false;
+    }
 
     // Avoid strings with clearly invalid path characters (simplistic)
+    // Note: Does not check for OS-specific reserved names like CON, PRN, etc.
     const hasValidChars = !/[<>:"|?*\x00-\x1F]/g.test(trimmed);
+     if (!hasValidChars) {
+        // console.log(`DEBUG isValidPathCandidate: Rejected invalid chars: ${trimmed}`);
+        return false;
+    }
 
-    // console.log(`DEBUG isValidPathCandidate: Candidate='${trimmed}', hasPathChars=${hasPathChars}, notLikelySentence=${notLikelySentence}, hasValidChars=${hasValidChars}`);
-    return hasPathChars && notLikelySentence && hasValidChars;
+    // console.log(`DEBUG isValidPathCandidate: Validated: '${trimmed}'`);
+    return true; // Passed all checks
 }
 
 
@@ -135,11 +169,12 @@ function extractPathFromPrecedingText(text: string | undefined): string | null {
 }
 
 /**
- * Tries extracting a path from a potential header comment at the start of code content.
+ * Tries extracting a path from a potential C-style header comment block
+ * at the start of code content. Looks for lines like `* path/to/file.ext`.
  * @param codeContent The raw content of the code block.
  * @returns A valid path candidate string or null.
  */
-function extractPathFromHeaderComment(codeContent: string): string | null {
+function extractPathFromHeaderCommentBlock(codeContent: string): string | null {
     if (!codeContent) return null;
 
     const commentMatch = codeContent.match(headerCommentPathRegex);
@@ -148,32 +183,66 @@ function extractPathFromHeaderComment(codeContent: string): string | null {
         // Check if commentContent was actually captured
         if (typeof commentContent === 'string') {
             const commentLines = commentContent.split(/\r?\n/);
-            // console.log(`DEBUG extractPathFromHeaderComment: Found comment block, checking lines:`, commentLines);
+            // console.log(`DEBUG extractPathFromHeaderCommentBlock: Found comment block, checking lines:`, commentLines);
 
             for (const line of commentLines) {
                 const lineMatch = line.match(pathInCommentLineRegex); // Check lines like '* path/to/file.ext'
                 const potentialPath = lineMatch?.[1]?.trim();
-                // console.log(`DEBUG extractPathFromHeaderComment: Checking line "${line.trim()}". Match: ${potentialPath}`);
+                // console.log(`DEBUG extractPathFromHeaderCommentBlock: Checking line "${line.trim()}". Match: ${potentialPath}`);
 
                 if (isValidPathCandidate(potentialPath)) {
-                    // console.log(`DEBUG extractPathFromHeaderComment: Path validated: "${potentialPath}"`);
+                    // console.log(`DEBUG extractPathFromHeaderCommentBlock: Path validated: "${potentialPath}"`);
                     return potentialPath;
                 }
             }
         } else {
-            // console.log(`DEBUG extractPathFromHeaderComment: Comment block matched, but capture group was empty or invalid.`);
+            // console.log(`DEBUG extractPathFromHeaderCommentBlock: Comment block matched, but capture group was empty or invalid.`);
         }
     }
-    // console.log(`DEBUG extractPathFromHeaderComment: No valid path found in header comment.`);
+    // console.log(`DEBUG extractPathFromHeaderCommentBlock: No valid path found in header comment block.`);
     return null;
 }
 
 /**
+ * Tries extracting a path from a comment on the *first line* of the code content.
+ * Checks for patterns like.
+ * @param codeContent The raw content of the code block.
+ * @returns A valid path candidate string or null.
+ */
+function extractPathFromFirstLineComment(codeContent: string): string | null {
+    if (!codeContent) return null;
+
+    const firstLine = codeContent.split(/\r?\n/, 1)[0];
+    if (!firstLine) return null;
+
+    const trimmedFirstLine = firstLine.trim();
+    // console.log(`DEBUG extractPathFromFirstLineComment: Checking line: "${trimmedFirstLine}"`);
+
+    for (const pattern of firstLineCommentPathPatterns) {
+        const match = trimmedFirstLine.match(pattern.regex);
+        if (match) {
+            const potentialPath = match[pattern.captureGroup]?.trim();
+            // console.log(`DEBUG extractPathFromFirstLineComment: Pattern "${pattern.name}" matched: "${potentialPath}"`);
+            if (isValidPathCandidate(potentialPath)) {
+                // console.log(`DEBUG extractPathFromFirstLineComment: Path validated: "${potentialPath}"`);
+                return potentialPath;
+            } else {
+                 // console.log(`DEBUG extractPathFromFirstLineComment: Path "${potentialPath}" failed validation.`);
+            }
+        }
+    }
+    // console.log(`DEBUG extractPathFromFirstLineComment: No valid path pattern matched or validated.`);
+    return null;
+}
+
+
+/**
  * Extracts file blocks from Markdown using the `marked` parser.
- * Looks for code blocks and attempts to find a corresponding file path by:
- * 1. Checking the immediately preceding non-space token (heading or paragraph).
- * 2. Checking for a path comment at the start of the code block itself.
- * 3. Checking for a path in a `**\`path\`**` format within a list item token preceding the code block.
+ * Looks for code blocks and attempts to find a corresponding file path by checking:
+ * 1. The immediately preceding non-space token (heading, paragraph, text).
+ * 2. A C-style header comment block
+ * 3. A path in a `**\`path\`**` format within a list item token preceding the code block.
+ * 4. A path comment on the first line of the code block itself.
  */
 export function extractMarkdownBlocksWithParser(
   markdownInput: string,
@@ -209,84 +278,82 @@ export function extractMarkdownBlocksWithParser(
 
         // 1. Check Preceding Token (skip spaces)
         let precedingTokenIndex = i - 1;
-        // let skippedSpace = false;
         while (tokens[precedingTokenIndex]?.type === 'space' && precedingTokenIndex >= 0) {
-            // console.log(`DEBUG Parser: Skipping space token at index ${precedingTokenIndex}`);
             precedingTokenIndex--;
-            // skippedSpace = true;
         }
         const precedingToken = tokens[precedingTokenIndex];
 
         if (precedingToken) {
-             // console.log(`DEBUG Parser: Checking preceding token at index ${precedingTokenIndex}, type: ${precedingToken.type}, raw: "${precedingToken.raw.substring(0, 50)}..."`);
+             // console.log(`DEBUG Parser: Checking preceding token at index ${precedingTokenIndex}, type: ${precedingToken.type}`);
              let textToSearch: string | undefined;
              if (precedingToken.type === 'heading') textToSearch = (precedingToken as Tokens.Heading).text;
              else if (precedingToken.type === 'paragraph') textToSearch = (precedingToken as Tokens.Paragraph).text;
-             else if (precedingToken.type === 'text') textToSearch = (precedingToken as Tokens.Text).text; // Handle simple text nodes too
+             else if (precedingToken.type === 'text') textToSearch = (precedingToken as Tokens.Text).text;
 
              path = extractPathFromPrecedingText(textToSearch);
              if (path) {
                  foundBy = 'Preceding Token';
                  precedingPathToken = precedingToken;
-                 // console.log(`DEBUG Parser: Path found via preceding token: ${path}`);
+                //  console.log(`DEBUG Parser: Path found via preceding token: ${path}`);
              }
         }
 
-        // 2. If no path from preceding token, check for Header Comment Path
+        // 2. If no path from preceding token, check for Header Comment Block Path
         if (!path) {
-            // console.log(`DEBUG Parser: No path from preceding token, checking header comment.`);
-            path = extractPathFromHeaderComment(codeContent);
+            // console.log(`DEBUG Parser: No path from preceding token, checking header comment block.`);
+            path = extractPathFromHeaderCommentBlock(codeContent);
              if (path) {
-                 foundBy = 'Header Comment';
-                 // Note: Header comment path doesn't have a separate "preceding token"
-                 // console.log(`DEBUG Parser: Path found via header comment: ${path}`);
+                 foundBy = 'Header Comment Block';
+                 // Note: This path source doesn't have a separate "preceding token"
+                //  console.log(`DEBUG Parser: Path found via header comment block: ${path}`);
             }
         }
 
         // 3. If no path yet, check for List Item Path Format
-        // Look back a few tokens for a 'list_item' that might contain the specific format.
         if (!path) {
-             // console.log(`DEBUG Parser: No path from preceding token or header comment, checking list item format.`);
-             // Look back max ~5 tokens (code -> maybe space -> list_item_end -> list_item -> list_start)
+            //  console.log(`DEBUG Parser: No path yet, checking list item format.`);
             for (let j = i - 1; j >= 0 && j >= i - 5; j--) {
-                 const potentialListItemToken = tokens[j]; // Will be a Token due to j >= 0 check
-                 // console.log(`DEBUG Parser: Checking token at index ${j} for list item: type=${potentialListItemToken.type}`); // No ?. needed
+                 const potentialListItemToken = tokens[j]!; // Assert non-null due to loop condition
+                //  console.log(`DEBUG Parser: Checking token at index ${j} for list item: type=${potentialListItemToken.type}`);
 
-                 // Use ! to assert potentialListItemToken is not undefined here
-                 if (potentialListItemToken!.type === 'list_item') { // <-- *** FIX 1: Add ! ***
+                 if (potentialListItemToken.type === 'list_item') {
                      const listItemToken = potentialListItemToken as Tokens.ListItem;
-                     const listItemText = listItemToken.text; // Text content of the list item
+                     const listItemText = listItemToken.text;
                     //  console.log(`DEBUG Parser: Found list_item token at index ${j}, text: "${listItemText}"`);
 
                      const match = listItemText.match(listItemPathRegex);
                      if (match) {
-                         const potentialPath = match[1]?.trim(); // Capture group 1 contains the path
+                         const potentialPath = match[1]?.trim();
                         //  console.log(`DEBUG Parser: List item regex matched: "${potentialPath}"`);
                          if (isValidPathCandidate(potentialPath)) {
                              path = potentialPath;
                              foundBy = 'List Item';
-                             precedingPathToken = listItemToken; // Mark this token as the source
+                             precedingPathToken = listItemToken;
                             //  console.log(`DEBUG Parser: Path validated from list item: ${path}`);
-                             break; // Found a valid path, stop looking back
+                             break;
                          } else {
                             // console.log(`DEBUG Parser: Path "${potentialPath}" from list item failed validation.`);
                          }
                      }
-                     // If we found a list_item, even if it didn't contain a valid path,
-                     // stop looking further back in this specific list item check loop.
-                     break;
-                 // Use ! to assert potentialListItemToken is not undefined here
-                 } else if (['space', 'list_start', 'list_end'].includes(potentialListItemToken!.type)) { // <-- *** FIX 2: Add ! ***
-                     // Skip tokens that are expected between list items and code blocks
-                     continue;
+                     break; // Found list_item, stop this inner loop check
+                 } else if (['space', 'list_start', 'list_end'].includes(potentialListItemToken.type)) {
+                     continue; // Skip expected intermediate tokens
                  } else {
-                     // If we hit something unexpected before finding a list_item, stop the list item search
-                    //  console.log(`DEBUG Parser: Encountered token type ${potentialListItemToken!.type} before list item, stopping list item search.`);
-                     break;
+                     break; // Hit something else, stop list item check
                  }
             }
         }
 
+        // 4. If *still* no path, check for First Line Comment Path
+        if (!path) {
+            // console.log(`DEBUG Parser: No path yet, checking first line comment.`);
+            path = extractPathFromFirstLineComment(codeContent);
+            if (path) {
+                foundBy = 'First Line Comment';
+                // Note: This path source doesn't have a separate "preceding token"
+                // console.log(`DEBUG Parser: Path found via first line comment: ${path}`);
+            }
+        }
 
         // --- Process if Path Found ---
         if (path && foundBy) { // Ensure we have a path and know how it was found
@@ -299,16 +366,28 @@ export function extractMarkdownBlocksWithParser(
             // console.log(`DEBUG Parser: Normalized path: ${normalized}`);
 
             // Use the raw text from the token, trim surrounding whitespace/newlines common in LLM output
-            const cleanedContent = codeContent
+            // For first-line comments, we might want to optionally remove that line from the content
+            let cleanedContent = codeContent
                 .replace(/^\s*\r?\n/, '') // Remove leading blank lines/whitespace
                 .replace(/\r?\n\s*$/, ''); // Remove trailing blank lines/whitespace
 
+            // Optional: Remove the first line if it was the source of the path comment
+            if (foundBy === 'First Line Comment') {
+                 const firstLine = cleanedContent.split(/\r?\n/, 1)[0];
+                 // Check if firstLine indeed matches one of the patterns used to extract the path
+                 const matchedPattern = firstLineCommentPathPatterns.find(p => firstLine?.trim().match(p.regex));
+                 if (firstLine && matchedPattern) {
+                    // Calculate length correctly, including potential leading/trailing whitespace removed by trim() earlier
+                    const originalFirstLineLength = firstLine.length;
+                    // Remove the first line and the following newline character(s)
+                    cleanedContent = cleanedContent.substring(originalFirstLineLength).replace(/^\r?\n/, '');
+                 }
+            }
+
             const existing = filesToWrite.get(normalized);
             if (existing) {
-                 // Allow overwriting if found again by Markdown, but warn. Explicit blocks take precedence.
                 if (existing.format !== formatName) {
                     console.log(`[${formatName}] Skipping ${normalized} (already defined by ${existing.format})`);
-                    // No need to replace processed input here, as explicit blocks handle it
                     continue; // Skip this markdown block
                 } else {
                     console.warn(`[${formatName}] Overwriting ${normalized} (previously found via ${foundBy})`);
@@ -318,14 +397,6 @@ export function extractMarkdownBlocksWithParser(
             }
 
             filesToWrite.set(normalized, { content: cleanedContent, format: formatName });
-
-            // Mark the preceding token and the code block as processed IF they haven't been handled
-            // by the explicit block removal already. This part is tricky because the explicit block
-            // removal modifies the input string *before* markdown parsing.
-            // For simplicity, we won't try to modify the `markdownInput` here, as the primary
-            // goal is extraction, and explicit blocks take precedence anyway. We rely on the
-            // `filesToWrite` map check (`existing.format !== formatName`) to prevent double processing.
-
 
         } else if (currentToken.type === 'code' && codeContent.length > 10 && !foundBy) {
             // Only warn if it's a code block, has some content, and no path was found by *any* method.

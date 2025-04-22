@@ -299,4 +299,75 @@ export default ValidComponent;
         warnSpy.mockRestore();
         errorSpy.mockRestore();
     });
+
+    it('parses markdown block with path in first line comment', () => {
+        const logSpy = jest.spyOn(console, 'log').mockImplementation();
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+        const input = fs.readFileSync(path.join(fixturesDir, 'markdown_first_line_comment_path.md'), 'utf8');
+        const result = parseInput(input);
+
+        // Debugging if test fails
+        if (result.size !== 3) {
+            console.log("DEBUG (first line comment path): Files found:", Array.from(result.keys()));
+            const tokens = marked.lexer(input);
+                console.log("DEBUG (first line comment path): Tokens:", JSON.stringify(tokens.map(t => ({type: t.type, text: (t as any).text?.substring(0,50), raw: t.raw.substring(0,50)})), null, 2));
+        }
+
+        expect(result.size).toBe(3); // Expect the 3 valid files
+
+        const path1 = 'packages/whisper/src/dockerManager.ts';
+        const path2 = 'scripts/process_data.py';
+        const path3 = 'styles/layout.css';
+
+        // Check file 1 (Typescript, // comment)
+        expect(result.has(path1)).toBe(true);
+        const fileData1 = result.get(path1);
+        expect(fileData1?.format).toBe('Markdown Block');
+        expect(fileData1?.content).not.toContain('// packages/whisper/src/dockerManager.ts'); // Check if comment was removed
+        expectMultiLineStringEqual(fileData1?.content, `
+import { exec as callbackExec } from 'child_process';
+import * as util from 'util';
+
+// rest of the docker manager code
+        `);
+
+        // Check file 2 (Python, # comment)
+        expect(result.has(path2)).toBe(true);
+        const fileData2 = result.get(path2);
+        expect(fileData2?.format).toBe('Markdown Block');
+        expect(fileData2?.content).not.toContain('# scripts/process_data.py'); // Check if comment was removed
+        expectMultiLineStringEqual(fileData2?.content, `
+import pandas as pd
+
+def process():
+    print("Processing data...")
+        `);
+
+        // Check file 3 (CSS, /* */ comment)
+        expect(result.has(path3)).toBe(true);
+        const fileData3 = result.get(path3);
+        expect(fileData3?.format).toBe('Markdown Block');
+        expect(fileData3?.content).not.toContain('/* styles/layout.css */'); // Check if comment was removed
+        expectMultiLineStringEqual(fileData3?.content, `
+body {
+    display: flex;
+}
+        `);
+
+        // Ensure the blocks with comments not on first line or invalid paths were skipped
+        expect(result.has('src/config.js')).toBe(false);
+        expect(result.has('../../etc/passwd')).toBe(false);
+
+        // Expect warnings for the 2 skipped/unidentified blocks
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
+
+        expect(errorSpy).not.toHaveBeenCalled();
+
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+    });
 });
