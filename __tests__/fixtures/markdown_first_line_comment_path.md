@@ -36,6 +36,15 @@ import type { Session, StructuredTranscript } from '../../../types';
 // Component logic here
 ```
 
+```tsx
+/* packages/api/src/api/sessionHandler.ts */
+import { handleRequest } from './helpers';
+
+export function processSession() {
+  // handler logic
+}
+```
+
 This block has the comment, but not on the first line:
 
 ```javascript

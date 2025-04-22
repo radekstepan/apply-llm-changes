@@ -1,4 +1,3 @@
-// File: __tests__/index.test.ts
 import * as fs from 'fs';
 import * as path from 'path';
 import { marked } from 'marked'; // *** Ensure this import is present ***
@@ -314,18 +313,19 @@ export default ValidComponent;
         const input = fs.readFileSync(path.join(fixturesDir, 'markdown_first_line_comment_path.md'), 'utf8');
         const result = parseInput(input);
 
-        if (result.size !== 4) {
+        if (result.size !== 5) {
             console.log("DEBUG (first line comment path): Files found:", Array.from(result.keys()));
             const tokens = marked.lexer(input);
             console.log("DEBUG (first line comment path): Tokens:", JSON.stringify(tokens.map(t => ({type: t.type, text: (t as any).text?.substring(0,50), raw: t.raw.substring(0,50)})), null, 2));
         }
 
-        expect(result.size).toBe(4); // Expect the 4 valid files
+        expect(result.size).toBe(5); // Expect the 5 valid files
 
         const path1 = 'packages/whisper/src/dockerManager.ts';
         const path2 = 'scripts/process_data.py';
         const path3 = 'styles/layout.css';
         const path4 = 'packages/ui/src/components/SessionView/Transcription/Transcription.tsx';
+        const path5 = 'packages/api/src/api/sessionHandler.ts';
 
         // Check file 1 (Typescript, // path)
         expect(result.has(path1)).toBe(true);
@@ -351,7 +351,7 @@ def process():
     print("Processing data...")
         `);
 
-        // Check file 3 (CSS, /* path */)
+        // Check file 3 (CSS, /* path */ style 1)
         expect(result.has(path3)).toBe(true);
         const fileData3 = result.get(path3);
         expect(fileData3?.format).toBe('Markdown Block');
@@ -375,6 +375,19 @@ import type { Session, StructuredTranscript } from '../../../types';
 // Component logic here
         `);
 
+        // Check file 5 (Typescript, /* path */ style 2)
+        expect(result.has(path5)).toBe(true);
+        const fileData5 = result.get(path5);
+        expect(fileData5?.format).toBe('Markdown Block');
+        expect(fileData5?.content).not.toContain('/* packages/api/src/api/sessionHandler.ts */'); // Check comment removed
+        expectMultiLineStringEqual(fileData5?.content, `
+import { handleRequest } from './helpers';
+
+export function processSession() {
+  // handler logic
+}
+        `);
+
         // Ensure the blocks with comments not on first line or invalid paths were skipped
         expect(result.has('src/config.js')).toBe(false);
         expect(result.has('../../etc/passwd')).toBe(false);
@@ -389,7 +402,6 @@ import type { Session, StructuredTranscript } from '../../../types';
         errorSpy.mockRestore();
     });
 
-    // *** UPDATED TEST SUITE for content matching the simplified 5-block fixture ***
     it('parses markdown blocks identified by Path: or backticks', () => {
         const logSpy = jest.spyOn(console, 'log').mockImplementation();
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
