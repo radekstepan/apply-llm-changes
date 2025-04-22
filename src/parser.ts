@@ -1,4 +1,3 @@
-// File: src/parser.ts
 /*
  * src/parser.ts
  * Contains functions to parse input text and extract file blocks
@@ -37,11 +36,9 @@ const listItemPathRegex = /\*\*\s*`([^`\s](?:[^`]*[^`\s])?)`\s*\*\*/;
 
 // Regex patterns to find a path comment on the first line of a code block
 const firstLineCommentPathPatterns = [
-    // *** UPDATED Regex to include optional "File:" prefix ***
     // Matches // path/to/file, # path/to/file, // File: path/to/file, # File: path/to/file
     { name: "Single Line Comment", regex: /^\s*(?:\/\/|#)\s*(?:File:\s*)?(\S+)\s*$/, captureGroup: 1 },
     // Matches /* path/to/file */ (single line only)
-    // *** UPDATED Regex to include optional "File:" prefix ***
     { name: "Block Comment Single Line", regex: /^\s*\/\*\s*(?:File:\s*)?(\S+)\s*\*\/$/, captureGroup: 1 },
 ];
 
@@ -248,6 +245,7 @@ function extractPathFromFirstLineComment(codeContent: string): string | null {
  * 2. A C-style header comment block at the start of the code.
  * 3. A path in a `**\`path\`**` format within a list item token preceding the code block.
  * 4. A path comment on the first line of the code block itself (including optional 'File: ' prefix).
+ * It also cleans potential stray ``` fences from the start/end of the code content.
  */
 export function extractMarkdownBlocksWithParser(
   markdownInput: string,
@@ -376,23 +374,31 @@ export function extractMarkdownBlocksWithParser(
 
             // console.log(`DEBUG Parser: Normalized path: ${normalized}`);
 
-            // Use the raw text from the token, trim surrounding whitespace/newlines common in LLM output
+            // --- Clean Content ---
+            // Start with the raw content, remove surrounding blank lines/whitespace
             let cleanedContent = codeContent
-                .replace(/^\s*\r?\n/, '') // Remove leading blank lines/whitespace
-                .replace(/\r?\n\s*$/, ''); // Remove trailing blank lines/whitespace
+                .replace(/^\s*\r?\n/, '')
+                .replace(/\r?\n\s*$/, '');
 
             // Remove the first line if it was the source of the path comment
+            // Do this *before* checking for backticks on the first line
             if (foundBy === 'First Line Comment') {
                  const firstLine = cleanedContent.split(/\r?\n/, 1)[0];
-                 // Double check if firstLine indeed matches one of the patterns used to extract the path
                  const matchedPattern = firstLineCommentPathPatterns.find(p => firstLine?.trim().match(p.regex));
                  if (firstLine && matchedPattern) {
-                    // Remove the first line and the following newline character(s)
-                    // Calculate the length of the original first line to slice correctly
                     const originalFirstLineLength = firstLine.length;
                     cleanedContent = cleanedContent.substring(originalFirstLineLength).replace(/^\r?\n/, ''); // Remove first line + subsequent newline
                  }
             }
+
+            // Remove ``` fences if they appear on first/last line
+            // Remove first line if it starts with ``` (potentially with language hint)
+            cleanedContent = cleanedContent.replace(/^\s*```.*?\r?\n/, '');
+            // Remove last line if it consists only of ``` (with optional whitespace)
+            cleanedContent = cleanedContent.replace(/\r?\n\s*```\s*$/, '');
+
+            // Final trim for any remaining whitespace after removals
+            cleanedContent = cleanedContent.trim();
 
             const existing = filesToWrite.get(normalized);
             if (existing) {
@@ -412,7 +418,13 @@ export function extractMarkdownBlocksWithParser(
                 console.log(`[${formatName}] Found: ${normalized} (via ${foundBy})`);
             }
 
-            filesToWrite.set(normalized, { content: cleanedContent, format: formatName });
+            // Only add if content is not empty after all cleaning
+            if (cleanedContent) {
+                filesToWrite.set(normalized, { content: cleanedContent, format: formatName });
+            } else {
+                 console.warn(`[${formatName}] Skipping ${normalized} (content became empty after cleaning).`);
+            }
+
 
         } else if (currentToken.type === 'code' && codeContent.length > 10 && !foundBy) {
             // Only warn if it's a code block, has some content, and no path was found by *any* method.
