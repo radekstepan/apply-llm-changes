@@ -250,4 +250,53 @@ const code = true;
         expect(fileData?.content?.trim().startsWith('/*')).toBe(true);
         expect(fileData?.content?.trim().endsWith('});')).toBe(true); // Check end of code
     });
+
+    it('skips markdown block with invalid path in preceding bolded list item', () => {
+        const logSpy = jest.spyOn(console, 'log').mockImplementation();
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+        const input = fs.readFileSync(path.join(fixturesDir, 'markdown_list_item_invalid_path.md'), 'utf8');
+        const result = parseInput(input);
+
+        // Debugging if test fails
+        if (result.size !== 1 || !result.has('src/valid-component.jsx')) {
+            console.log("DEBUG (invalid list item path): Files found:", Array.from(result.keys()));
+            const tokens = marked.lexer(input);
+             console.log("DEBUG (invalid list item path): Tokens:", JSON.stringify(tokens.map(t => ({type: t.type, text: (t as any).text?.substring(0,50), raw: t.raw.substring(0,50)})), null, 2));
+        }
+
+        // Only the valid path should be present
+        expect(result.size).toBe(1);
+        expect(result.has('src/valid-component.jsx')).toBe(true);
+
+        // Ensure the invalid paths were NOT added
+        expect(result.has('http://example.com/not/a/local/path.js')).toBe(false);
+        expect(result.has('C:/absolute/path/on/windows.txt')).toBe(false); // Path normalization would convert backslashes if it *was* processed
+
+        // Check the content of the valid file
+        const fileData = result.get('src/valid-component.jsx');
+        expect(fileData?.format).toBe('Markdown Block');
+        expectMultiLineStringEqual(fileData?.content, `
+// This should be parsed correctly.
+import React from 'react';
+
+function ValidComponent() {
+  return <div>Valid</div>;
+}
+
+export default ValidComponent;
+        `);
+
+        // We expect warnings for the 3 code blocks whose paths were skipped or missing
+        expect(warnSpy).toHaveBeenCalledTimes(3);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Code block found, but could not determine file path"));
+
+        // No errors expected
+        expect(errorSpy).not.toHaveBeenCalled();
+
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+    });
 });

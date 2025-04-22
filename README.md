@@ -8,9 +8,13 @@ This tool helps automate the process of creating or updating files based on code
 
 *   **Reads from Standard Input:** Designed to be piped into (`llm_command | apply-llm-changes`) or receive pasted text.
 *   **Multiple Format Support:** Parses several common ways LLMs indicate file paths and content:
-    *   Explicit Start/End comment blocks (`/* START OF path/to/file.ext */ ... /* END OF path/to/file.ext */`)
-    *   Explicit XML-like tags (`<file path="path/to/file.ext"> ... </file>`)
-    *   Markdown code blocks preceded by a path identifier (heading, paragraph with backticks, standalone path).
+    *   Explicit Start/End comment blocks (`
+[LLM_APPLY_Processed Comment Block for path/to/file.ext]
+`)
+    *   Explicit XML-like tags (`
+[LLM_APPLY_Processed Tag Block for path/to/file.ext]
+`)
+    *   Markdown code blocks preceded by a path identifier (heading, paragraph with backticks, standalone path, header comment, list item).
 *   **File System Operations:**
     *   Writes extracted content to the specified relative paths.
     *   Creates necessary directories automatically.
@@ -26,44 +30,39 @@ The tool processes input looking for these patterns:
     ```text
     Some introductory text...
 
-    /* START OF src/myComponent.js */
-    export function MyComponent() {
-      return <div>Hello</div>;
-    }
-    /* END OF src/myComponent.js */
+    
+[LLM_APPLY_Processed Comment Block for src/myComponent.js]
+
 
     More text...
     ```
 
 2.  **Explicit Tag Blocks:**
     ```xml
-    <file path="data/config.json">
-    {
-      "setting": true,
-      "value": 123
-    }
-    </file>
+    
+[LLM_APPLY_Processed Tag Block for data/config.json]
+
     ```
     *(Note: `name` or `filename` can be used instead of `path`)*
 
 3.  **Markdown Code Blocks:**
-    The tool looks for standard Markdown fenced code blocks (``` ```) and checks the **immediately preceding non-empty line (or token)** for a file path. Supported preceding lines include:
+    The tool looks for standard Markdown fenced code blocks (``` ```) and attempts to identify the file path using one of the following methods (checked in roughly this order):
 
-    *   **Heading:**
+    *   **Preceding Heading:**
         ```markdown
         ## File: styles/main.css
 
         ```css
         body { margin: 0; }
         ```
-    *   **Paragraph with Inline Code:**
+    *   **Preceding Paragraph with Inline Code:**
         ```markdown
         Here is the utility function `src/utils/helper.ts`:
 
         ```typescript
         export const helper = () => true;
         ```
-    *   **Standalone Path:**
+    *   **Preceding Standalone Path:**
         ```markdown
         path/to/script.py
 
@@ -71,17 +70,38 @@ The tool processes input looking for these patterns:
         import sys
         print(sys.argv)
         ```
-    *   **Paragraph with Explicit Marker:**
+    *   **Preceding Paragraph with Explicit Marker:**
         ```markdown
         Path: config/app.yaml
 
         ```yaml
         port: 8080
         ```
+    *   **Header Comment in Code Block:**
+        ```typescript
+        /*
+         * src/specialUtil.ts
+         * This file contains a special utility.
+         */
+        export function special() {
+          // ...
+        }
+        ```
+        *(Note: The path should typically be on a line starting with `*` within the comment block)*
+    *   **Preceding Numbered List Item with Bolded Path:**
+        ```markdown
+        Okay, here is the full source code for the modified files:
+
+        **1. `src/component.ts`**
+
+        ```typescript
+        export class MyComponent {}
+        ```
+        ```
 
 ## Usage
 
-1.  **Generate LLM Output:** Obtain the file modification instructions from your LLM.
+1.  **Generate LLM Output:** Obtain the file modification instructions from your LLM using one of the supported formats.
 2.  **Pipe or Paste to CLI:**
     *   **Pipe:** If the output is in a file or from another command:
         ```bash
@@ -96,7 +116,7 @@ The tool processes input looking for these patterns:
         (Paste your content here)
         Then press `Ctrl+D` (Linux/macOS) or `Ctrl+Z` then `Enter` (Windows) to signal the end of input.
 
-3.  **Review Changes:** The tool will log the files it intends to write and any warnings or errors. Files will be created/overwritten in the current directory (or subdirectories).
+3.  **Review Changes:** The tool will log the files it intends to write and any warnings or errors. Files will be created/overwritten in the current directory (or subdirectories). Always review changes made by automated tools.
 
 ## Local Development
 
@@ -141,7 +161,7 @@ To work on this tool locally:
         Now you should be able to run the command globally from any directory:
         ```bash
         # Example: Create a test file
-        echo "## File: linked-test.txt\n\`\`\`\nHello from linked version!\n\`\`\`" | apply-llm-changes
+        echo "**1. \`linked-test.txt\`**\n\`\`\`\nHello from linked version!\n\`\`\`" | apply-llm-changes
 
         # Check if linked-test.txt was created
         cat linked-test.txt
