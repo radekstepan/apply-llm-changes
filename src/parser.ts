@@ -60,9 +60,10 @@ export async function determineFilePath(context: string): Promise<string> {
       {
         role: 'system',
         content: [
-          'You are an assistant that assigns a relative file path to a code snippet based on context.',
-          'If the snippet cannot be mapped to any file, respond with exactly NO_PATH (without quotes).',
-          'Otherwise, respond only with the file path, relative to the project root—no extra commentary.'
+          'You are an assistant that assigns the complete relative file path to a code snippet based on context.',
+          'Always include the full directory structure from the project root (e.g. packages/foo/src/file.js),',
+          'and never omit any parent folders.',
+          'If the snippet cannot be mapped to any file, respond with exactly NO_PATH.'
         ].join(' ')
       },
       {
@@ -71,9 +72,9 @@ export async function determineFilePath(context: string): Promise<string> {
           'Here is the context for the upcoming code block:\n\n',
           context,
           '\n\nRespond with exactly one of the following:\n',
-          '- A relative file path (e.g. src/app.js)\n',
+          '- A full relative file path including all directories (e.g. packages/foo/src/file.js)\n',
           '- NO_PATH if you cannot determine a suitable path.\n',
-          'Do not include any other text or formatting.'
+          'Do not include any other text, comments, or formatting.'
         ].join('')
       },
     ],
