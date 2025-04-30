@@ -1,6 +1,0 @@
-<file path="data/config.json">
-{
-  "key": "value",
-  "enabled": true
-}
-</file>

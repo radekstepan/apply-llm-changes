@@ -1,9 +1,0 @@
-Some text before.
-
-/* START OF src/component.ts */
-export class MyComponent {
-  // component code
-}
-/* END OF src/component.ts */
-
-Some text after.

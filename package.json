@@ -1,6 +1,6 @@
 {
   "name": "apply-llm-changes-cli",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Applies file changes described in LLM output read from stdin.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

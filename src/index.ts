@@ -1,121 +1,95 @@
-#!/usr/bin/env node
-// llm-apply-cli/src/index.ts
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import {
-  extractExplicitBlocks,
-  explicitCommentBlockRegex,
-  explicitTagBlockRegex,
-  type FilesMap,
-  type FileData,
-  extractMarkdownBlocksWithParser
-} from './parser';
+// File: src/index.ts
+import * as fsPromises from 'fs/promises';
+import fs from 'fs';
+import * as path from 'node:path';
+import dotenv from 'dotenv';
+// Import the specific functions needed
+import { extractAllCodeBlocks } from './parser';
+import type { FilesMap } from './parser'; // Import type if needed elsewhere
 
-// Helper to read all of stdin
-async function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('readable', () => {
-      let chunk;
-      while ((chunk = process.stdin.read()) !== null) {
-        data += chunk;
-      }
-    });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
-  });
+// findPackageRoot function remains the same...
+/**
+ * Walks up from startDir until it finds package.json or node_modules,
+ * falling back to process.cwd() if none.
+ */
+function findPackageRoot(startDir: string): string {
+  let dir = startDir;
+  while (true) {
+    if (
+      fs.existsSync(path.join(dir, 'package.json')) ||
+      fs.existsSync(path.join(dir, 'node_modules'))
+    ) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
 }
 
-async function ensureDirectoryExists(filePath: string): Promise<void> {
-  const dirname = path.dirname(filePath);
-  if (!dirname || dirname === '.' || dirname === '/') return;
-  try {
-    await fs.access(dirname);
-  } catch (err: any) {
-    if (err.code === 'ENOENT') {
-      await fs.mkdir(dirname, { recursive: true });
-    } else {
-      throw err;
-    }
+// Load the .env from the package root
+const packageRoot = findPackageRoot(__dirname);
+dotenv.config({ path: path.join(packageRoot, '.env') });
+
+
+/** Reads all data from stdin. */
+async function readStdin(): Promise<string> {
+  let data = '';
+  process.stdin.setEncoding('utf8');
+  for await (const chunk of process.stdin) {
+    data += chunk;
   }
+  return data;
 }
 
 async function runCli() {
-  const filesToWrite: FilesMap = new Map();
-  console.log('Waiting for input via stdin...');
-  const originalInput = await readStdin();
-
-  if (!originalInput.trim()) {
-    console.error('Error: No input received.');
+  console.log('Waiting for LLM output via stdin...');
+  const originalInput = (await readStdin()).trim();
+  if (!originalInput) {
+    console.error('Error: No input received from stdin');
     process.exit(1);
   }
 
-  // 1) Explicit comment blocks
-  let remaining = extractExplicitBlocks(
-    originalInput,
-    explicitCommentBlockRegex,
-    'Comment Block',
-    filesToWrite
-  );
-
-  // 2) Explicit tag blocks
-  remaining = extractExplicitBlocks(
-    remaining,
-    explicitTagBlockRegex,
-    'Tag Block',
-    filesToWrite
-  );
-
-  // 3) Markdown blocks → _now_ LLM-driven
-  console.log('Parsing Markdown code blocks via LLM...');
-  await extractMarkdownBlocksWithParser(remaining, filesToWrite);
-
-  // 4) Write out files
-  console.log('Writing files...');
-  let written = 0,
-      errors = 0;
+  // Call extractAllCodeBlocks and receive the map
+  const filesToWrite: FilesMap = await extractAllCodeBlocks(originalInput);
 
   if (filesToWrite.size === 0) {
-    console.warn('No files identified. Exiting.');
+    console.warn('No valid code blocks with file paths found. Exiting.');
     process.exit(0);
   }
 
-  for (const [relPath, { content, format }] of filesToWrite.entries()) {
-    const normalized = path.normalize(relPath).replace(/\\/g, '/');
+  console.log(`\nFound ${filesToWrite.size} files to write.`);
 
-    if (
-      normalized.startsWith('../') ||
-      normalized.startsWith('/') ||
-      path.isAbsolute(normalized)
-    ) {
-      console.error(`Unsafe path rejected: ${relPath}`);
-      errors++;
-      continue;
+  let written = 0, errors = 0;
+  for (const [relPath, { content }] of filesToWrite.entries()) {
+    // Add extra validation for safety
+    if (path.isAbsolute(relPath) || relPath.startsWith('..')) {
+        console.error(`Error: Skipping potentially unsafe path "${relPath}"`);
+        errors++;
+        continue;
     }
-
-    const abs = path.resolve(process.cwd(), normalized);
+    const dest = path.resolve(process.cwd(), relPath);
     try {
-      await ensureDirectoryExists(abs);
-      const toWrite =
-        content.endsWith('\n') || content === '' ? content : content + '\n';
-      await fs.writeFile(abs, toWrite, 'utf8');
-      console.log(`Wrote ${normalized}  [${format}]`);
+      await fsPromises.mkdir(path.dirname(dest), { recursive: true });
+      // Ensure content ends with a newline for POSIX compatibility
+      const contentToWrite = content.endsWith('\n') ? content : content + '\n';
+      await fsPromises.writeFile(dest, contentToWrite, 'utf8');
+      console.log(`Wrote ${relPath}`);
       written++;
-    } catch (err) {
-      console.error(`Error writing ${normalized}:`, err);
+    } catch (e: any) {
+      console.error(`Error writing ${relPath}:`, e.message || e);
       errors++;
     }
   }
 
-  console.log(`\nSummary: ${written} written, ${errors} errors.`);
+  console.log(`\nSummary: Wrote ${written}, Skipped/Errors ${errors}`);
   if (errors > 0) process.exit(1);
-  process.exit(0);
 }
 
 if (require.main === module) {
-  runCli().catch((err) => {
-    console.error('Fatal error:', err);
+  runCli().catch(e => {
+    console.error('Unexpected error in CLI:', e);
     process.exit(1);
   });
 }
