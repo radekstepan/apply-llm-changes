@@ -34,12 +34,18 @@ describe('Parser Integration Tests', () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'explicit_comment.txt'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('src/component.ts')).toBe(true);
+      const data = files.get('src/component.ts');
+      expect(data).toBeDefined();
+      expect(data!.content).toContain('export class MyComponent');
     });
 
     it('parses explicit tag blocks', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'explicit_tag.txt'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('data/config.json')).toBe(true);
+      const data = files.get('data/config.json');
+      expect(data).toBeDefined();
+      expect(data!.content).toContain('"key": "value"');
     });
   });
 
@@ -48,18 +54,27 @@ describe('Parser Integration Tests', () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_paragraph_path.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('src/app.js')).toBe(true);
+      const data = files.get('src/app.js');
+      expect(data).toBeDefined();
+      expect(data!.content).toContain("console.log('Hello World!')");
     });
 
     it('heading path', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_heading_path.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('styles/main.css')).toBe(true);
+      const data = files.get('styles/main.css');
+      expect(data).toBeDefined();
+      expect(data!.content).toContain('background-color: #f0f0f0');
     });
 
     it('standalone path', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_standalone_path.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('path/to/my_script.py')).toBe(true);
+      const data = files.get('path/to/my_script.py');
+      expect(data).toBeDefined();
+      expect(data!.content).toContain('import sys');
     });
   });
 
@@ -76,44 +91,55 @@ describe('Parser Integration Tests', () => {
       expect(files.has('config/settings.yaml')).toBe(true);
       expect(files.has('scripts/run.sh')).toBe(true);
       expect(files.has('docs/README.md')).toBe(true);
+      const yaml = files.get('config/settings.yaml')!;
+      expect(yaml.content).toContain('port: 8080');
+      const script = files.get('scripts/run.sh')!;
+      expect(script.content).toContain('echo "Starting..."');
+      const doc = files.get('docs/README.md')!;
+      expect(doc.content).toContain('# Project Docs');
     });
 
     it('normalizes backslashes', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'path_normalization.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('src/utils/helpers.ts')).toBe(true);
+      const data = files.get('src/utils/helpers.ts')!;
+      expect(data.content).toContain('helper = () => true');
     });
   });
 
   describe('Invalid or Edge Cases', () => {
-    // it('skips invalid list item paths', async () => {
-    //   const input = fs.readFileSync(path.join(fixturesDir, 'markdown_list_item_invalid_path.md'), 'utf8');
-    //   const files = await parseAll(input);
-
-    //   expect(files.has('src/valid-component.jsx')).toBe(true);
-    //   expect(files.size).toBe(1);
-    // });
-
     it('handles front matter path', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_front_matter_path.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('packages/api/src/db/sqliteService.ts')).toBe(true);
+      const data = files.get('packages/api/src/db/sqliteService.ts')!;
+      expect(data.content).toContain('import crypto from');
     });
 
     it('handles header comment path', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_header_comment_path.md'), 'utf8');
       const files = await parseAll(input);
       expect(files.has('src/__tests__/utils/headerCommentUtil.test.ts')).toBe(true);
+      const data = files.get('src/__tests__/utils/headerCommentUtil.test.ts')!;
+      expect(data.content).toContain("expect(true).toBe(true)");
     });
 
     it('handles first line comment paths', async () => {
       const input = fs.readFileSync(path.join(fixturesDir, 'markdown_first_line_comment_path.md'), 'utf8');
       const files = await parseAll(input);
-      expect(files.has('packages/whisper/src/dockerManager.ts')).toBe(true);
-      expect(files.has('scripts/process_data.py')).toBe(true);
-      expect(files.has('styles/layout.css')).toBe(true);
-      expect(files.has('packages/ui/src/components/SessionView/Transcription/Transcription.tsx')).toBe(true);
-      expect(files.has('packages/api/src/api/sessionHandler.ts')).toBe(true);
+      const paths = [
+        'packages/whisper/src/dockerManager.ts',
+        'scripts/process_data.py',
+        'styles/layout.css',
+        'packages/ui/src/components/SessionView/Transcription/Transcription.tsx',
+        'packages/api/src/api/sessionHandler.ts'
+      ];
+      for (const p of paths) {
+        expect(files.has(p)).toBe(true);
+        const data = files.get(p)!;
+        expect(data.content.length).toBeGreaterThan(0);
+      }
     });
 
     it('handles backticks path variants', async () => {
@@ -124,6 +150,8 @@ describe('Parser Integration Tests', () => {
       expect(files.has('config/data.yaml')).toBe(true);
       expect(files.has('scripts/combo.sh')).toBe(true);
       expect(files.has('start_only.txt')).toBe(true);
+      const cleaner = files.get('src/utils/cleaner.js')!;
+      expect(cleaner.content).toContain('function cleanInput');
     });
   });
 });
