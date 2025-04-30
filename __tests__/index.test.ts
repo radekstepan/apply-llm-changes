@@ -154,4 +154,28 @@ describe('Parser Integration Tests', () => {
       expect(cleaner.content).toContain('function cleanInput');
     });
   });
+
+  describe('Double-comment explicit blocks (START_FILE_SOURCE)', () => {
+    it('parses two explicit blocks wrapped in double comment fences', async () => {
+      const input = fs.readFileSync(
+        path.join(fixturesDir, 'markdown_double_comments.md'),
+        'utf8'
+      );
+      const files = await parseAll(input);
+
+      // should pick up both TSX and CSS blocks
+      const tsxPath = 'packages/ui/src/components/SessionView/Chat/ChatMessages.tsx';
+      const cssPath = 'packages/ui/src/styles/global.css';
+
+      expect(files.has(tsxPath)).toBe(true);
+      expect(files.has(cssPath)).toBe(true);
+
+      const tsx = files.get(tsxPath)!;
+      expect(tsx.content).toContain('import React, { useState } from \'react\'');
+      expect(tsx.content).toContain('// TODO comments should not be removed');
+
+      const css = files.get(cssPath)!;
+      expect(css.content).toContain('@import \'@radix-ui/themes/styles.css\'');
+    });
+  });
 });
