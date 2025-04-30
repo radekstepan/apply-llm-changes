@@ -1,11 +1,10 @@
-// File: src/parser.ts
-// src/parser.ts
 import path from 'node:path';
 import fs from 'node:fs';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
-import { marked } from 'marked'; // Import marked
+import { marked } from 'marked';
 
+// findPackageRoot function remains the same...
 /**
  * Walks up from startDir until it finds package.json or node_modules,
  * falling back to process.cwd() if none.
@@ -37,6 +36,7 @@ const model = process.env.LLM_MODEL || 'gpt-4o-mini'; // Or your preferred defau
 let client: OpenAI | null = null;
 if (apiKey && baseURL) {
     client = new OpenAI({ apiKey, baseURL });
+    console.log("LLM Client Initialized."); // Add confirmation
 } else {
     console.warn('LLM_API_KEY or LLM_API_BASE_URL not found in environment. determineFilePath will throw errors.');
 }
@@ -48,8 +48,10 @@ if (apiKey && baseURL) {
  */
 export async function determineFilePath(snippet: string): Promise<string> {
   if (!client) {
+      console.error('LLM client not initialized attempt in determineFilePath.');
       throw new Error('LLM client not initialized. Missing API Key or Base URL.');
   }
+  console.log(`Determining file path for snippet starting with: "${snippet.substring(0, 50).replace(/\n/g, '\\n')}..."`);
   try {
     const resp = await client.chat.completions.create({
         model,
@@ -66,112 +68,99 @@ export async function determineFilePath(snippet: string): Promise<string> {
             'Do not add any explanation, preamble, or markdown formatting to your response. Respond only with the path or NO_PATH.'
             ].join(' ')
         },
-        { role: 'user', content: `Assign a file path to the following code snippet:\n\n\`\`\`\n${snippet}\n\`\`\`` } // Provide snippet in a code block for context
-        ]
+        { role: 'user', content: `Assign a file path to the following code snippet:\n\n\`\`\`\n${snippet}\n\`\`\`` }
+        ],
     });
 
     const choice = resp.choices?.[0];
     let content = choice?.message?.content?.trim();
 
     if (!content) {
-        console.warn('LLM response was empty, assuming NO_PATH.');
+        console.warn('LLM response was empty for snippet, assuming NO_PATH.');
         return 'NO_PATH';
     }
+     console.log(`LLM raw response: "${content}"`);
 
-    // Sometimes models might still add markdown fences
     content = content.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '').trim();
 
-    // Basic validation, reject obviously bad paths
     if (content.startsWith('/') || content.startsWith('C:') || content.startsWith('http:') || content.startsWith('https:') || content.includes('..')) {
         console.warn(`LLM returned potentially unsafe or invalid path "${content}", treating as NO_PATH.`);
         return 'NO_PATH';
     }
 
-    // Normalize backslashes just in case
     content = content.replace(/\\/g, '/');
 
+    console.log(`LLM determined path: "${content}"`);
     return content;
 
   } catch (error: any) {
-      console.error(`Error calling LLM API: ${error.message}`);
-      // Decide how to handle API errors - rethrow, return NO_PATH, etc.
-      // Returning NO_PATH might be safer for unattended operation.
-      return 'NO_PATH'; // Or rethrow error if failure should stop the process
+      console.error(`Error calling LLM API in determineFilePath: ${error.message}`);
+      return 'NO_PATH';
   }
 }
 
-export type FileData = { content: string; format: string }; // format can be lang hint or generic
+export type FileData = { content: string; format: string };
 export type FilesMap = Map<string, FileData>;
 
 /**
- * Extracts fenced code blocks using the 'marked' parser,
- * calls the LLM for its file path, and returns a map of files to write.
- * Skips any block where the LLM returns NO_PATH.
- *
- * @param input The markdown input string.
- * @returns A Promise resolving to a FilesMap containing the paths and content.
+ * Extracts fenced code blocks using 'marked', calls LLM sequentially for paths,
+ * and returns a map of files to write.
  */
 export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
-    // Instantiate the map *inside* the function
     const filesToWrite: FilesMap = new Map();
-
-    console.log("Parsing input with marked...");
+    console.log("Parsing input with marked (sequential processing)...");
     const tokens = marked.lexer(input);
     let blockIndex = 0;
-    const processingPromises: Promise<void>[] = []; // Collect promises for concurrent LLM calls
+    let codeBlockCount = 0; // Count actual code blocks found
 
-    marked.walkTokens(tokens, (token) => {
+    console.log(`Iterating through ${tokens.length} tokens sequentially...`);
+
+    // Iterate directly over the tokens from the lexer
+    for (const token of tokens) {
+        // Check if the current token is a code block
         if (token.type === 'code') {
-            blockIndex++;
-            const currentBlockIndex = blockIndex; // Capture index for async context
+            codeBlockCount++; // Increment count only for code blocks
+            blockIndex++; // Keep track of overall block number if needed, or use codeBlockCount
+
+            // Access properties directly from the token (TS infers type within the 'if')
             const snippetRaw = token.text ?? '';
             const snippet = snippetRaw.trim();
-            const lang = token.lang || 'unknown'; // Get language hint if available
+            const lang = token.lang || 'unknown';
 
             if (!snippet) {
-                console.log(`Skipping empty code block #${currentBlockIndex}.`);
-                return; // Skip empty blocks
+                console.log(`Skipping empty code block #${codeBlockCount}.`);
+                continue; // Skip empty blocks
             }
 
-            console.log(`Queueing processing for code block #${currentBlockIndex} (lang: ${lang}, length: ${snippet.length})...`);
+            console.log(`Processing code block #${codeBlockCount} (lang: ${lang}, length: ${snippet.length})...`);
 
-            // Create a promise for processing this block
-            const processPromise = (async () => {
-                let filePath: string;
-                try {
-                    filePath = await determineFilePath(snippet);
-                } catch (err: any) {
-                    // Error is already logged in determineFilePath
-                    console.error(`Skipping block #${currentBlockIndex} due to LLM error.`);
-                    return; // Skip block on LLM error
-                }
+            // Await each LLM call sequentially
+            let filePath: string;
+            try {
+                filePath = await determineFilePath(snippet);
+            } catch (err: any) {
+                console.error(`Skipping block #${codeBlockCount} due to LLM error during await.`);
+                continue; // Skip block on LLM error
+            }
 
-                if (filePath === 'NO_PATH') {
-                    console.log(`LLM returned NO_PATH for block #${currentBlockIndex}. Skipping.`);
-                    return; // Skip blocks with no mapped path
-                }
+            if (filePath === 'NO_PATH') {
+                console.log(`LLM returned NO_PATH for block #${codeBlockCount}. Skipping.`);
+                continue; // Skip blocks with no mapped path
+            }
 
-                console.log(`LLM mapped block #${currentBlockIndex} to path: ${filePath}`);
+            console.log(`LLM mapped block #${codeBlockCount} to path: ${filePath}`);
 
-                // Note: Concurrent writes to the map are generally safe in JS single-threaded event loop
-                // If a race condition on overwriting becomes an issue, synchronize access or handle conflicts post-processing.
-                if (filesToWrite.has(filePath)) {
-                    console.warn(`Warning: Overwriting file path "${filePath}" from a previous block (Block #${currentBlockIndex}).`);
-                }
+            if (filesToWrite.has(filePath)) {
+                console.warn(`Warning: Overwriting file path "${filePath}" from a previous block (Block #${codeBlockCount}).`);
+            }
 
-                filesToWrite.set(filePath, {
-                    content: snippetRaw,
-                    format: `markdown code block (lang: ${lang})`
-                });
-            })();
-            processingPromises.push(processPromise);
-        }
-    });
+            filesToWrite.set(filePath, {
+                content: snippetRaw,
+                format: `markdown code block (lang: ${lang})`
+            });
+        } // End if (token.type === 'code')
+    } // End loop through tokens
 
-    // Wait for all LLM calls and map insertions to complete
-    await Promise.all(processingPromises);
-
-    console.log(`Finished processing ${blockIndex} potential code blocks. Returning map with ${filesToWrite.size} entries.`);
-    // Return the populated map
+    console.log(`Finished sequential processing. Found ${codeBlockCount} code blocks. Returning map with ${filesToWrite.size} entries.`);
     return filesToWrite;
 }
