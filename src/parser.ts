@@ -1,9 +1,30 @@
-// src/parser.ts
-// Heavily refactored to use the OpenAI npm package for any OpenAI-compatible endpoint (LM Studio, etc.).
+import path from 'node:path';
+import fs from 'node:fs';
 import dotenv from 'dotenv';
-dotenv.config();
-
 import OpenAI from 'openai';
+
+/**
+ * Starting from `startDir`, walk upward until you find a directory
+ * containing `package.json` or `node_modules`. Return that dir.
+ * If none is found, fall back to process.cwd().
+ */
+function findPackageRoot(startDir: string): string {
+  let dir = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(dir, 'package.json')) ||
+        fs.existsSync(path.join(dir, 'node_modules'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;  // reached filesystem root
+    dir = parent;
+  }
+  return process.cwd();
+}
+
+// __dirname is where this compiled file lives (e.g. <root>/dist)
+const packageRoot = findPackageRoot(__dirname);
+dotenv.config({ path: path.join(packageRoot, '.env') });
 
 // --- Explicit block regexes ---
 export const explicitCommentBlockRegex =
