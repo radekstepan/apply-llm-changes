@@ -29,7 +29,9 @@ const packageRoot = findPackageRoot(__dirname);
 dotenv.config({ path: path.join(packageRoot, '.env') });
 
 // LLM client setup
-const apiKey = process.env.LLM_API_KEY;
+const rawKey = process.env.LLM_API_KEY;
+// if rawKey matches an existing env var name, use that; otherwise use rawKey directly
+const apiKey = rawKey && process.env[rawKey] ? process.env[rawKey] : rawKey;
 const baseURL = process.env.LLM_API_BASE_URL;
 const model = process.env.LLM_MODEL || 'gpt-4o-mini'; // Or your preferred default
 
