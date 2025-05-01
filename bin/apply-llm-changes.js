@@ -3,29 +3,32 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
+// No longer need 'fs' for this approach
+
+// Determine the project root directory (where package.json is)
+const projectRoot = path.resolve(__dirname, '..');
 
 // Determine the path to the actual compiled script (dist/index.js)
-// __dirname points to the 'bin' directory where this wrapper lives.
-// We need to go up one level and then into 'dist'.
-const scriptPath = path.resolve(__dirname, '../dist/index.js');
+const scriptPath = path.join(projectRoot, 'dist/index.js');
 
 // Prepare the arguments for the 'npx' command
 const args = [
-    '@infisical/cli',        // Command for npx to execute
-    'run',                   // Infisical command
+    '@infisical/cli',
+    'run',
+    // Add the flag pointing to the project root where Infisical config should be found
+    `--project-config-dir=${projectRoot}`,
     '--',                    // Separator for the command Infisical should run
     'node',                  // The runtime for our actual script
     scriptPath,              // The path to our actual script
     ...process.argv.slice(2) // Pass along any arguments originally given to apply-llm-changes
 ];
 
-// Optional: Log the command being executed for debugging
-// console.log(`Wrapper executing: npx ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`);
-
 // Execute 'npx' with the prepared arguments
+console.log(`Wrapper executing: npx ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`); // Debug log
 const child = spawn('npx', args, {
-    // Ensure stdin, stdout, and stderr are connected correctly
-    // so you can still paste input and see output/errors.
+    // Use 'inherit' to connect stdin/stdout/stderr directly.
+    // No need to change 'env' or 'cwd' here. Infisical uses the flag,
+    // and 'node' runs in the user's original CWD by default.
     stdio: 'inherit'
 });
 
@@ -38,11 +41,8 @@ child.on('error', (err) => {
 // Relay the exit code/signal from the child process
 child.on('exit', (code, signal) => {
     if (signal) {
-        // console.error(`Wrapper: Child process killed with signal ${signal}`); // Optional log
-        // Simulate signal exit if possible, otherwise exit(1)
         process.kill(process.pid, signal);
     } else {
-        // console.log(`Wrapper: Child process finished with code ${code}.`); // Optional log
         process.exit(code === null ? 1 : code); // Exit with the child's code
     }
 });
