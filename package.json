@@ -1,14 +1,14 @@
 {
   "name": "apply-llm-changes-cli",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Applies file changes described in LLM output read from stdin.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "apply-llm-changes": "dist/index.js"
+    "apply-llm-changes": "bin/apply-llm-changes.js"
   },
   "scripts": {
-    "build": "tsc && echo '#!/usr/bin/env node' | cat - dist/index.js > temp && mv temp dist/index.js && chmod +x dist/index.js",
+    "build": "tsc && chmod +x bin/apply-llm-changes.js",
     "dev": "ts-node src/index.ts",
     "prepare": "yarn build",
     "start": "npx @infisical/cli run -- node dist/index.js",

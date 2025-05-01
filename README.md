@@ -1,5 +1,12 @@
 # Apply LLM Changes CLI (`apply-llm-changes`)
 
+## TODO
+
+- [ ] use npx export-path
+- [ ] add a command to init the .env file and login to infisical
+- [ ] update README to have infisical instructions
+- [ ] rewrite
+
 A command-line tool to read structured file modification instructions from Large Language Model (LLM) output (via stdin) and apply them to the local filesystem in the current directory.
 
 This tool helps automate the process of creating or updating files based on code snippets and file paths provided by language models, streamlining workflows where code generation or modification instructions are received in text format.
