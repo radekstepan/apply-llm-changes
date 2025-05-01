@@ -2,8 +2,6 @@
   "name": "apply-llm-changes-cli",
   "version": "2.1.1",
   "description": "Applies file changes described in LLM output read from stdin.",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "bin": {
     "apply-llm-changes": "bin/apply-llm-changes.js"
   },
@@ -11,8 +9,8 @@
     "build": "tsc && chmod +x bin/apply-llm-changes.js",
     "dev": "ts-node src/index.ts",
     "prepare": "yarn build",
-    "start": "npx @infisical/cli run -- node dist/index.js",
-    "test": "npx @infisical/cli run -- jest"
+    "start": "infisical run -- node dist/index.js",
+    "test": "infisical run -- jest"
   },
   "keywords": [
     "cli",
@@ -29,6 +27,7 @@
     "README.md"
   ],
   "dependencies": {
+    "@infisical/cli": "^0.41.0",
     "dotenv": "^16.5.0",
     "marked": "^15.0.8",
     "openai": "^4.96.2"

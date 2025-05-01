@@ -13,7 +13,6 @@ const scriptPath = path.join(projectRoot, 'dist/index.js');
 
 // Prepare the arguments for the 'npx' command
 const args = [
-    '@infisical/cli',
     'run',
     // Add the flag pointing to the project root where Infisical config should be found
     `--project-config-dir=${projectRoot}`,
@@ -23,9 +22,9 @@ const args = [
     ...process.argv.slice(2) // Pass along any arguments originally given to apply-llm-changes
 ];
 
-// Execute 'npx' with the prepared arguments
-console.log(`Wrapper executing: npx ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`); // Debug log
-const child = spawn('npx', args, {
+// Execute 'infisical' with the prepared arguments
+console.log(`Wrapper executing: infisical ${args.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`); // Debug log
+const child = spawn('infisical', args, {
     // Use 'inherit' to connect stdin/stdout/stderr directly.
     // No need to change 'env' or 'cwd' here. Infisical uses the flag,
     // and 'node' runs in the user's original CWD by default.
