@@ -3,47 +3,45 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
-// No longer need 'fs' for this approach
 
-// Determine the project root directory (where package.json is)
+// Determine the project root directory (location of package.json)
 const projectRoot = path.resolve(__dirname, '..');
 
-// Determine the path to the actual compiled script (dist/index.js)
+// Path to the compiled main script
 const scriptPath = path.join(projectRoot, 'dist/index.js');
 
-// Prepare the arguments for the 'npx' command
+// Prepare arguments for 'infisical run'
+// This wrapper ensures environment variables are loaded via Infisical
+// before executing the actual Node.js script.
 const args = [
   'run',
-  // Add the flag pointing to the project root where Infisical config should be found
+  // Point Infisical to the project root for its configuration (.infisical.json, .env)
   `--project-config-dir=${projectRoot}`,
-  '--', // Separator for the command Infisical should run
-  'node', // The runtime for our actual script
-  scriptPath, // The path to our actual script
-  ...process.argv.slice(2), // Pass along any arguments originally given to apply-llm-changes
+  '--', // Separator: Arguments after this are for the command Infisical runs
+  'node', // The runtime
+  scriptPath, // The script to execute
+  ...process.argv.slice(2), // Pass through any arguments given to the wrapper script
 ];
 
-// Execute 'infisical' with the prepared arguments
-console.log(
-  `Wrapper executing: infisical ${args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`
-); // Debug log
+// Execute 'infisical run' with the constructed arguments
+// console.log(`Wrapper executing: infisical ${args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`); // Uncomment for debugging
 const child = spawn('infisical', args, {
-  // Use 'inherit' to connect stdin/stdout/stderr directly.
-  // No need to change 'env' or 'cwd' here. Infisical uses the flag,
-  // and 'node' runs in the user's original CWD by default.
+  // Connect stdin, stdout, stderr directly to the parent process
+  // This allows piping input and seeing output as if running the script directly.
   stdio: 'inherit',
 });
 
-// Handle potential errors during spawning itself
+// Handle errors during the spawn process itself (e.g., 'infisical' not found)
 child.on('error', (err) => {
   console.error('Wrapper failed to spawn process:', err);
-  process.exit(1); // Exit with an error code
+  process.exit(1);
 });
 
-// Relay the exit code/signal from the child process
+// Relay the exit code or signal from the child process (infisical run)
 child.on('exit', (code, signal) => {
   if (signal) {
-    process.kill(process.pid, signal);
+    process.kill(process.pid, signal); // Propagate signal termination
   } else {
-    process.exit(code === null ? 1 : code); // Exit with the child's code
+    process.exit(code === null ? 1 : code); // Exit with the child's exit code
   }
 });

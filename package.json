@@ -1,6 +1,6 @@
 {
   "name": "apply-llm-changes-cli",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Applies file changes described in LLM output read from stdin.",
   "bin": {
     "apply-llm-changes": "bin/apply-llm-changes.js"
@@ -9,7 +9,7 @@
     "prepare": "husky && yarn build",
     "build": "tsc && chmod +x bin/apply-llm-changes.js",
     "dev": "ts-node src/index.ts",
-    "start": "infisical run -- node dist/index.js",
+    "start": "infisical run -- ./bin/apply-llm-changes.js",
     "test": "infisical run -- jest"
   },
   "keywords": [
@@ -20,7 +20,7 @@
     "typescript",
     "markdown"
   ],
-  "author": "Your Name <your.email@example.com>",
+  "author": "Radek Stepan <dev@radekstepan.com>",
   "license": "MIT",
   "files": [
     "dist",

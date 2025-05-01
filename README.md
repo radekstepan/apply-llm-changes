@@ -1,119 +1,89 @@
 # Apply LLM Changes CLI (`apply-llm-changes`)
 
-## TODO
+A command-line tool that reads structured file modification instructions from Large Language Model (LLM) output (via stdin) and applies them to the local filesystem in the current working directory.
 
-- [ ] use npx export-path
-- [ ] remove <file path="packages/system/src/main.ts" /> tags
-- [ ] add a command to init the .env file and login to infisical
-- [ ] update README to have infisical instructions
-- [ ] rewrite
-
-A command-line tool to read structured file modification instructions from Large Language Model (LLM) output (via stdin) and apply them to the local filesystem in the current directory.
-
-This tool helps automate the process of creating or updating files based on code snippets and file paths provided by language models, streamlining workflows where code generation or modification instructions are received in text format.
-
-## Core Features
-
-*   **Reads from Standard Input:** Designed to be piped into (`llm_command | apply-llm-changes`) or receive pasted text.
-*   **Multiple Format Support:** Parses several common ways LLMs indicate file paths and content:
-    *   Explicit Start/End comment blocks (`
-[LLM_APPLY_Processed Comment Block for path/to/file.ext]
-`)
-    *   Explicit XML-like tags (`
-[LLM_APPLY_Processed Tag Block for path/to/file.ext]
-`)
-    *   Markdown code blocks preceded by a path identifier (heading, paragraph with backticks, standalone path, header comment, list item).
+This tool uses an LLM (like GPT models via OpenAI API, LM Studio, etc.) to determine the intended file path for standard markdown code blocks and explicitly handles `` tags directly, extracting the path and content. These tags take precedence over LLM-detected paths for the same file.
 *   **File System Operations:**
-    *   Writes extracted content to the specified relative paths.
+    *   Writes extracted content to the specified relative paths within the current working directory.
     *   Creates necessary directories automatically.
     *   Normalizes paths (e.g., converts `\` to `/`).
 *   **Safety:** Rejects absolute paths or paths attempting to navigate outside the current directory (`../`).
-*   **Idempotency (Basic):** If multiple blocks specify the same file, explicit blocks generally take precedence over Markdown blocks, and warnings are issued for overwrites.
+*   **Environment Variable Management:** Uses Infisical (via `infisical run`) to securely load API keys and other configurations from `.env` files.
 
 ## Supported Input Formats
 
 The tool processes input looking for these patterns:
 
-1.  **Explicit Comment Blocks:**
-    ```text
-    Some introductory text...
+1.  **Explicit `<file>` Tags:**
+    These tags provide a clear path and content. The path attribute is mandatory.
 
-    
-[LLM_APPLY_Processed Comment Block for src/myComponent.js]
-
-
-    More text...
-    ```
-
-2.  **Explicit Tag Blocks:**
     ```xml
     
-[LLM_APPLY_Processed Tag Block for data/config.json]
-
     ```
-    *(Note: `name` or `filename` can be used instead of `path`)*
+    *(Note: The content inside the tags is written to the specified `path`.)*
 
-3.  **Markdown Code Blocks:**
-    The tool looks for standard Markdown fenced code blocks (``` ```) and attempts to identify the file path using one of the following methods (checked in roughly this order):
+2.  **Standard Markdown Code Blocks:**
+    For fenced code blocks (``` ```), the tool sends the code snippet (and surrounding text context) to the configured LLM to determine the most likely relative file path.
 
-    *   **Preceding Heading:**
-        ```markdown
-        ## File: styles/main.css
+    ```markdown
+    Here's the updated utility function:
 
-        ```css
-        body { margin: 0; }
-        ```
-    *   **Preceding Paragraph with Inline Code:**
-        ```markdown
-        Here is the utility function `src/utils/helper.ts`:
+    ```typescript
+    // src/utils/helpers.ts  <- LLM might infer path from comments or context
+    export function newHelper(): boolean {
+      console.log("Using new helper!");
+      return true;
+    }
+    ```
 
-        ```typescript
-        export const helper = () => true;
-        ```
-    *   **Preceding Standalone Path:**
-        ```markdown
-        path/to/script.py
+    And the main application file:
 
-        ```python
-        import sys
-        print(sys.argv)
-        ```
-    *   **Preceding Paragraph with Explicit Marker:**
-        ```markdown
-        Path: config/app.yaml
+    ```javascript
+    // src/app.js
+    import { newHelper } from './utils/helpers';
 
-        ```yaml
-        port: 8080
-        ```
-    *   **Header Comment in Code Block:**
-        ```typescript
-        /*
-         * src/specialUtil.ts
-         * This file contains a special utility.
-         */
-        export function special() {
-          // ...
-        }
-        ```
-        *(Note: The path should typically be on a line starting with `*` within the comment block)*
-    *   **Preceding Numbered List Item with Bolded Path:**
-        ```markdown
-        Okay, here is the full source code for the modified files:
+    console.log('App started');
+    newHelper();
+    ```
+    *(Note: The LLM's accuracy in determining the path depends on the model used and the clarity of the input context.)*
 
-        **1. `src/component.ts`**
+**Precedence:** If both a `<file>` tag and a markdown block resolve to the same file path, the content from the `<file>` tag will be used, and the markdown block for that path will be skipped.
 
-        ```typescript
-        export class MyComponent {}
-        ```
-        ```
+## Setup
+
+1.  **Prerequisites:**
+    *   Node.js (See `.nvmrc` for the recommended version, use `nvm use` if you have nvm)
+    *   Yarn v1 (Classic)
+    *   Infisical CLI (for environment variable management): `npm install -g @infisical/cli`
+
+2.  **Clone & Install:**
+    ```bash
+    git clone https://github.com/your-username/apply-llm-changes-cli.git # Replace with actual URL
+    cd apply-llm-changes-cli
+    yarn install
+    ```
+
+3.  **Configure Environment:**
+    *   Copy the example environment file: `cp .env.example .env`
+    *   Edit the `.env` file and provide your LLM credentials:
+        *   `LLM_API_KEY`: Your API key (e.g., `OPENAI_API_KEY` if using OpenAI). If the value is the *name* of another environment variable (like `OPENAI_API_KEY`), the tool will use the value of that variable.
+        *   `LLM_API_BASE_URL`: The base URL for your LLM API endpoint (e.g., `https://api.openai.com/v1/` or your LM Studio URL like `http://localhost:1234/v1/`).
+        *   `LLM_MODEL`: (Optional) The model identifier (e.g., `gpt-4o-mini`, `google/gemma-2-27b-it`). Defaults to `gpt-4o-mini`.
+
+4.  **(Optional) Infisical Login:**
+    If you plan to use Infisical for more advanced secret management (beyond the local `.env` file), log in:
+    ```bash
+    infisical login
+    ```
+    Follow the prompts. The `.infisical.json` file links this project to an Infisical workspace. The `infisical run` command used in scripts will automatically inject secrets based on your setup. For basic local `.env` usage, Infisical simply acts as a loader.
 
 ## Usage
 
-1.  **Generate LLM Output:** Obtain the file modification instructions from your LLM using one of the supported formats.
+1.  **Generate LLM Output:** Obtain the file modification instructions from your LLM using one of the supported formats (`<file>` tags or markdown code blocks).
 2.  **Pipe or Paste to CLI:**
     *   **Pipe:** If the output is in a file or from another command:
         ```bash
-        cat llm_output.txt | apply-llm-changes
+        cat llm_output.md | apply-llm-changes
         # or
         your_llm_command --prompt "update files..." | apply-llm-changes
         ```
@@ -124,121 +94,55 @@ The tool processes input looking for these patterns:
         (Paste your content here)
         Then press `Ctrl+D` (Linux/macOS) or `Ctrl+Z` then `Enter` (Windows) to signal the end of input.
 
-3.  **Review Changes:** The tool will log the files it intends to write and any warnings or errors. Files will be created/overwritten in the current directory (or subdirectories). Always review changes made by automated tools.
+3.  **Review Changes:** The tool will log the files it intends to write (based on `<file>` tags or LLM responses) and any warnings or errors. Files will be created/overwritten in the *current working directory* (or subdirectories relative to it). **Always review changes made by automated tools.**
 
 ## Local Development
 
-To work on this tool locally:
-
-1.  **Prerequisites:**
-    *   Node.js (See `.nvmrc` for the recommended version, use `nvm use` if you have nvm)
-    *   Yarn v1 (Classic)
-
-2.  **Clone & Install:**
-    ```bash
-    git clone <repository-url>
-    cd apply-llm-changes-cli
-    yarn install
-    ```
-
-3.  **Build:** Compile TypeScript to JavaScript:
+1.  **Setup:** Follow the Setup steps above.
+2.  **Build:** Compile TypeScript to JavaScript:
     ```bash
     yarn build
     ```
-    (Output goes to the `dist/` directory)
-
-4.  **Test:** Run the test suite:
+    (Output goes to the `dist/` directory. The `bin/apply-llm-changes.js` wrapper points to this.)
+3.  **Test:** Run the test suite (uses Infisical to load `.env` for LLM credentials):
     ```bash
     yarn test
     ```
-
-5.  **Using `yarn link` for Local Testing:**
-    `yarn link` allows you to create a global command-line alias (`apply-llm-changes`) that points directly to your local development code. This is useful for testing the command end-to-end without publishing.
-
+4.  **Run Locally:** Execute the compiled script (using Infisical to load `.env`):
+    ```bash
+    # Example: Pipe test input
+    echo '' | yarn start
+    ```
+5.  **Linking for Global Use (`yarn link`):**
+    To test the `apply-llm-changes` command globally using your local code:
     *   **Step 1: Create the link**
-        In the project directory (`apply-llm-changes-cli`), run:
+        In the project directory:
         ```bash
         yarn link
         ```
-        This registers the package locally.
-
-    *   **Step 2: Add Yarn's global bin directory to your PATH (If needed)**
-        For your shell to find the command created by `yarn link`, the directory where Yarn places global binaries must be in your system's `PATH` environment variable. See the next section for instructions.
-
-    *   **Step 3: Test the linked command**
-        Now you should be able to run the command globally from any directory:
+    *   **Step 2: Add Yarn's global bin to PATH (If needed)**
+        Ensure Yarn's global binary directory is in your system `PATH`. Find the directory:
         ```bash
-        # Example: Create a test file
-        echo "**1. \`linked-test.txt\`**\n\`\`\`\nHello from linked version!\n\`\`\`" | apply-llm-changes
-
-        # Check if linked-test.txt was created
-        cat linked-test.txt
+        yarn global bin
         ```
-
+        Add this path to your shell's configuration (`.bashrc`, `.zshrc`, etc.) or system environment variables. See detailed instructions [here](https://classic.yarnpkg.com/en/docs/cli/global#toc-adding-the-install-location-to-your-path).
+    *   **Step 3: Test the linked command**
+        From any directory:
+        ```bash
+        echo '```js\n// linked-test.js\nconsole.log("Linked!");\n```' | apply-llm-changes
+        cat linked-test.js
+        ```
     *   **Step 4: Develop and Rebuild**
-        Make changes to the source code in `src/`. After making changes, you **must rebuild** the project for the linked command to reflect those changes:
+        Make code changes in `src/`. **Rebuild** after changes:
         ```bash
         yarn build
         ```
-        Then you can test the `apply-llm-changes` command again.
-
+        The linked `apply-llm-changes` command will now use the updated code.
     *   **Step 5: Unlink (When Done)**
-        To remove the global command link:
         ```bash
         yarn unlink
         ```
 
-## Adding Yarn's Global Bin Directory to PATH
-
-If commands installed globally via Yarn (like the one created by `yarn link`) aren't found, you need to add Yarn's binary directory to your system's `PATH`.
-
-1.  **Find the Yarn Bin Directory:**
-    Run this command to see where Yarn installs global binaries:
-    ```bash
-    yarn global bin
-    ```
-    (Copy this path)
-
-2.  **Add the Path to your Shell Configuration:**
-
-    *   **Bash or Zsh (Common on Linux/macOS):**
-        Edit your shell configuration file (`~/.bashrc` for Bash, `~/.zshrc` for Zsh):
-        ```bash
-        # Add this line at the end, replacing /path/to/yarn/bin with the actual path from step 1
-        export PATH="$(yarn global bin):$PATH"
-        ```
-        Save the file and reload the configuration:
-        ```bash
-        source ~/.bashrc  # or source ~/.zshrc
-        ```
-        Or simply open a new terminal window.
-
-    *   **Fish Shell:**
-        Run this command in your terminal:
-        ```bash
-        fish_add_path (yarn global bin)
-        ```
-        This will add it persistently. Open a new terminal window.
-
-    *   **Windows (Command Prompt / PowerShell):**
-        *   Search for "Environment Variables" in the Windows search bar and select "Edit the system environment variables".
-        *   Click the "Environment Variables..." button.
-        *   In the "System variables" (or "User variables" if you only want it for your user) section, find the `Path` variable, select it, and click "Edit...".
-        *   Click "New" and paste the directory path you copied from `yarn global bin`.
-        *   Click "OK" on all dialog windows.
-        *   **Important:** You need to **open a new Command Prompt or PowerShell window** for the changes to take effect.
-
-3.  **Verify:**
-    Open a **new** terminal window and try running a globally linked command or check your path:
-    ```bash
-    echo $PATH # (Linux/macOS/Fish)
-    # or
-    echo %PATH% # (Windows CMD)
-    # or
-    $env:Path # (Windows PowerShell)
-    ```
-    You should see the Yarn bin directory listed.
-
 ## License
 
-MIT (See `package.json`)
+MIT

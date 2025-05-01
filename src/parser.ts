@@ -4,10 +4,14 @@ import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { marked } from 'marked';
 
-// findPackageRoot function remains the same...
+// --- Configuration and Setup ---
+
 /**
- * Walks up from startDir until it finds package.json or node_modules,
- * falling back to process.cwd() if none.
+ * Walks up the directory tree from startDir until it finds a 'package.json'
+ * or 'node_modules' directory, indicating the project root.
+ * Falls back to the current working directory if neither is found.
+ * @param startDir The directory to start searching from.
+ * @returns The determined package root directory path.
  */
 function findPackageRoot(startDir: string): string {
   let dir = startDir;
@@ -19,44 +23,95 @@ function findPackageRoot(startDir: string): string {
       return dir;
     }
     const parent = path.dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir) break; // Reached filesystem root
     dir = parent;
   }
-  return process.cwd();
+  return process.cwd(); // Fallback
 }
 
+// Load environment variables relative to the project root
 const packageRoot = findPackageRoot(__dirname);
 dotenv.config({ path: path.join(packageRoot, '.env') });
 
-// LLM client setup
+// Initialize LLM client using environment variables
 const rawKey = process.env.LLM_API_KEY;
-// if rawKey matches an existing env var name, use that; otherwise use rawKey directly
+// Allow LLM_API_KEY to be the actual key OR the name of another env var holding the key
 const apiKey = rawKey && process.env[rawKey] ? process.env[rawKey] : rawKey;
 const baseURL = process.env.LLM_API_BASE_URL;
-const model = process.env.LLM_MODEL || 'gpt-4o-mini'; // Or your preferred default
+const model = process.env.LLM_MODEL || 'gpt-4.1-mini-2025-04-14'; // Default model
 
 let client: OpenAI | null = null;
 if (apiKey && baseURL) {
   client = new OpenAI({ apiKey, baseURL });
-  console.log('LLM Client Initialized.'); // Add confirmation
+  console.log('LLM Client Initialized.');
 } else {
   console.warn(
-    'LLM_API_KEY or LLM_API_BASE_URL not found in environment. determineFilePath will throw errors.'
+    'LLM_API_KEY or LLM_API_BASE_URL not configured in environment. Path detection for standard markdown blocks will fail.'
   );
 }
 
+// --- Types ---
+
+export type FileData = { content: string; format: string };
+export type FilesMap = Map<string, FileData>; // Map<filePath, FileData>
+
+// --- Utility Functions ---
+
 /**
- * Ask the LLM to assign a full relative file path to the snippet.
- * Must return the complete path (including all folders) or NO_PATH.
+ * Normalizes a potential file path string:
+ * - Trims whitespace.
+ * - Converts backslashes to forward slashes.
+ * - Removes surrounding quotes.
+ * Validates the path:
+ * - Returns null if empty, '.', absolute, contains '..', or is otherwise unsafe.
+ * @param filePath The potential file path string.
+ * @returns The normalized, relative path or null if invalid/unsafe.
+ */
+function normalizeAndValidatePath(
+  filePath: string | null | undefined
+): string | null {
+  if (!filePath) return null;
+
+  let normalizedPath = filePath.trim().replace(/\\/g, '/'); // Use forward slashes
+  normalizedPath = normalizedPath.replace(/^["']|["']$/g, ''); // Remove surrounding quotes
+
+  // Basic safety checks for relative paths within the current project
+  if (
+    normalizedPath.startsWith('/') || // Absolute Unix paths
+    /^[a-zA-Z]:[\\\/]/.test(normalizedPath) || // Absolute Windows paths
+    normalizedPath.includes('..') // Directory traversal
+  ) {
+    console.warn(`Skipping potentially unsafe or absolute path: "${filePath}"`);
+    return null;
+  }
+  if (!normalizedPath || normalizedPath === '.') {
+    console.warn(`Skipping invalid path: "${filePath}"`);
+    return null;
+  }
+
+  return normalizedPath;
+}
+
+/**
+ * Uses the configured LLM to determine a relative file path for a given code snippet.
+ * @param snippet The code snippet (potentially with surrounding context).
+ * @returns A promise resolving to the determined relative file path (using forward slashes) or 'NO_PATH' if unable to determine or an error occurs.
  */
 export async function determineFilePath(snippet: string): Promise<string> {
   if (!client) {
-    console.error('LLM client not initialized attempt in determineFilePath.');
-    throw new Error('LLM client not initialized. Missing API Key or Base URL.');
+    // Log error but return NO_PATH to allow processing of <file> tags
+    console.error(
+      'LLM client not initialized. Cannot determine path for markdown block.'
+    );
+    return 'NO_PATH';
   }
+
   console.log(
-    `Determining file path for snippet starting with: "${snippet.substring(0, 50).replace(/\n/g, '\\n')}..."`
+    `Determining file path via LLM for snippet starting with: "${snippet
+      .substring(0, 50)
+      .replace(/\n/g, '\\n')}..."`
   );
+
   try {
     const resp = await client.chat.completions.create({
       model,
@@ -66,7 +121,7 @@ export async function determineFilePath(snippet: string): Promise<string> {
           content: [
             'You are an assistant that assigns the full relative file path to a code snippet.',
             'Analyze the snippet content and any surrounding context provided.',
-            'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js).',
+            'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js) based on common project structures, comments, or import statements within the snippet.',
             'Ensure the path is relative to a project root and uses forward slashes (/).',
             'Do not include absolute paths (e.g., /home/user/...) or URLs.',
             'If you cannot confidently determine a reasonable file path for the snippet, respond with exactly the string NO_PATH.',
@@ -78,111 +133,168 @@ export async function determineFilePath(snippet: string): Promise<string> {
           content: `Assign a file path to the following code snippet:\n\n\`\`\`\n${snippet}\n\`\`\``,
         },
       ],
+      temperature: 0.1, // Low temperature for deterministic path finding
     });
 
     const choice = resp.choices?.[0];
     let content = choice?.message?.content?.trim();
 
-    if (!content) {
-      console.warn('LLM response was empty for snippet, assuming NO_PATH.');
+    if (!content || content === 'NO_PATH') {
+      console.log('LLM response was empty or explicitly NO_PATH.');
       return 'NO_PATH';
     }
     console.log(`LLM raw response: "${content}"`);
 
+    // Clean potential markdown fences from the LLM response itself
     content = content
       .replace(/^```[^\n]*\n?/, '')
       .replace(/\n?```$/, '')
       .trim();
 
-    if (
-      content.startsWith('/') ||
-      content.startsWith('C:') ||
-      content.startsWith('http:') ||
-      content.startsWith('https:') ||
-      content.includes('..')
-    ) {
+    // Validate the path returned by the LLM
+    const validatedPath = normalizeAndValidatePath(content);
+    if (!validatedPath) {
       console.warn(
-        `LLM returned potentially unsafe or invalid path "${content}", treating as NO_PATH.`
+        `LLM returned invalid/unsafe path "${content}", treating as NO_PATH.`
       );
       return 'NO_PATH';
     }
 
-    content = content.replace(/\\/g, '/');
-
-    console.log(`LLM determined path: "${content}"`);
-    return content;
+    console.log(`LLM determined path: "${validatedPath}"`);
+    return validatedPath;
   } catch (error: any) {
     console.error(
       `Error calling LLM API in determineFilePath: ${error.message}`
     );
-    return 'NO_PATH';
+    return 'NO_PATH'; // Return NO_PATH on API error
   }
 }
 
-export type FileData = { content: string; format: string };
-export type FilesMap = Map<string, FileData>;
+// --- Main Extraction Logic ---
 
 /**
- * Extracts fenced code blocks using 'marked', calls LLM sequentially for paths,
- * and returns a map of files to write.
+ * Extracts file paths and content from input text.
+ * Handles explicit  tags first.
+ * Then, uses an LLM to determine paths for standard markdown code blocks.
+ * Explicit tags take precedence over LLM-determined paths for the same file.
+ * @param input The raw input string containing potential file blocks.
+ * @returns A promise resolving to a Map where keys are relative file paths and values are { content, format }.
  */
 export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
   const filesToWrite: FilesMap = new Map();
-  console.log('Parsing input with marked (sequential processing)...');
-  const tokens = marked.lexer(input);
-  let blockIndex = 0;
-  let codeBlockCount = 0; // Count actual code blocks found
+  let remainingInput = input;
 
-  console.log(`Iterating through ${tokens.length} tokens sequentially...`);
+  console.log('Step 1: Pre-processing for explicit <file> tags...');
 
-  // Iterate directly over the tokens from the lexer
-  for (const token of tokens) {
-    // Check if the current token is a code block
-    if (token.type === 'code') {
-      codeBlockCount++; // Increment count only for code blocks
-      blockIndex++; // Keep track of overall block number if needed, or use codeBlockCount
+  // Regex to find  blocks
+  // Captures: 1=quote type, 2=path, 3=content
+  const fileTagRegex = /<file\s+path=(["'])(.*?)\1>([\s\S]*?)<\/file>/g;
 
-      // Access properties directly from the token (TS infers type within the 'if')
-      const snippetRaw = token.text ?? '';
-      const snippet = snippetRaw.trim();
-      const lang = token.lang || 'unknown';
-
-      if (!snippet) {
-        console.log(`Skipping empty code block #${codeBlockCount}.`);
-        continue; // Skip empty blocks
-      }
-
-      console.log(
-        `Processing code block #${codeBlockCount} (lang: ${lang}, length: ${snippet.length})...`
-      );
-
-      // Await each LLM call sequentially
-      let filePath: string;
-      try {
-        filePath = await determineFilePath(snippet);
-      } catch (err: any) {
-        console.error(
-          `Skipping block #${codeBlockCount} due to LLM error during await.`
+  // Use replace with a callback to extract info and remove the block from further processing
+  remainingInput = remainingInput.replace(
+    fileTagRegex,
+    (match, quote, filePathRaw, contentRaw) => {
+      const filePath = normalizeAndValidatePath(filePathRaw);
+      if (!filePath) {
+        console.warn(
+          `Invalid or unsafe path found in <file> tag: "${filePathRaw}". Skipping this block.`
         );
-        continue; // Skip block on LLM error
+        // Return empty string to remove this block entirely
+        return '';
       }
 
-      if (filePath === 'NO_PATH') {
-        console.log(
-          `LLM returned NO_PATH for block #${codeBlockCount}. Skipping.`
-        );
-        continue; // Skip blocks with no mapped path
-      }
+      // Trim leading/trailing whitespace/newlines from the captured content
+      const content = contentRaw.trim();
 
-      console.log(`LLM mapped block #${codeBlockCount} to path: ${filePath}`);
+      console.log(`Found explicit <file> tag for path: "${filePath}"`);
 
       if (filesToWrite.has(filePath)) {
         console.warn(
-          `Warning: Overwriting file path "${filePath}" from a previous block (Block #${codeBlockCount}).`
+          `Warning: Overwriting file path "${filePath}" from a previous block (Explicit <file> tag encountered).`
         );
       }
 
       filesToWrite.set(filePath, {
+        content: content, // Store the cleaned content
+        format: `explicit <file> tag`,
+      });
+
+      // Return an empty string to remove this block from the input passed to markdown parser
+      return '';
+    }
+  );
+
+  console.log(
+    'Step 2: Processing remaining input with marked for standard code blocks...'
+  );
+  // Process the input *after* <file> tags have been removed
+  const tokens = marked.lexer(remainingInput);
+  let codeBlockCount = 0;
+
+  console.log(
+    `Iterating through ${tokens.length} marked tokens for code blocks...`
+  );
+
+  // Iterate through markdown tokens to find code blocks
+  for (const token of tokens) {
+    if (token.type === 'code') {
+      codeBlockCount++;
+
+      const snippetRaw = token.text ?? ''; // Use original content for writing
+      const lang = token.lang || 'unknown';
+      const snippetTrimmed = snippetRaw.trim(); // Use trimmed for LLM analysis
+
+      if (!snippetTrimmed) {
+        console.log(`Skipping empty markdown code block #${codeBlockCount}.`);
+        continue; // Skip empty blocks
+      }
+
+      console.log(
+        `Processing markdown code block #${codeBlockCount} (lang: ${lang}, length: ${snippetRaw.length}). Calling LLM...`
+      );
+
+      let llmFilePath: string;
+      try {
+        // Ask LLM to determine the path for the trimmed snippet
+        llmFilePath = await determineFilePath(snippetTrimmed);
+      } catch (err: any) {
+        console.error(
+          `Skipping markdown block #${codeBlockCount} due to LLM error: ${
+            err.message || err
+          }.`
+        );
+        continue; // Skip block on LLM error
+      }
+
+      if (llmFilePath === 'NO_PATH') {
+        console.log(
+          `LLM returned NO_PATH for markdown block #${codeBlockCount}. Skipping.`
+        );
+        continue; // Skip blocks where LLM couldn't determine a path
+      }
+
+      console.log(
+        `LLM mapped markdown block #${codeBlockCount} to path: ${llmFilePath}`
+      );
+
+      // Precedence Check: Skip if path already exists from an explicit <file> tag
+      if (filesToWrite.has(llmFilePath)) {
+        const existingData = filesToWrite.get(llmFilePath);
+        if (existingData?.format === 'explicit <file> tag') {
+          console.warn(
+            `Warning: Skipping markdown block #${codeBlockCount} for path "${llmFilePath}". Path was already defined by an explicit <file> tag.`
+          );
+          continue; // Skip this markdown block
+        } else {
+          // Allow overwriting if the previous block was also a markdown block
+          console.warn(
+            `Warning: Overwriting file path "${llmFilePath}" from a previous markdown block (Block #${codeBlockCount}).`
+          );
+        }
+      }
+
+      // Store the original, *untrimmed* content from the markdown block
+      filesToWrite.set(llmFilePath, {
         content: snippetRaw,
         format: `markdown code block (lang: ${lang})`,
       });
@@ -190,7 +302,7 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
   } // End loop through tokens
 
   console.log(
-    `Finished sequential processing. Found ${codeBlockCount} code blocks. Returning map with ${filesToWrite.size} entries.`
+    `Finished processing. Found ${filesToWrite.size} files to write.`
   );
   return filesToWrite;
 }
