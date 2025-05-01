@@ -4,11 +4,11 @@
     /* Base Options: */
     "esModuleInterop": true,
     "skipLibCheck": true, // Skips type checking of declaration files (.d.ts) in node_modules
-    "target": "ES2020",   // Target modern Node.js versions
-    "allowJs": true,      // Allow JavaScript files to be compiled
+    "target": "ES2020", // Target modern Node.js versions
+    "allowJs": true, // Allow JavaScript files to be compiled
     "resolveJsonModule": true, // Allow importing .json files
     "moduleDetection": "force", // Ensures module context even for files without imports/exports
-    "isolatedModules": true,    // Improves build tool compatibility, ensure TS knows modules are separate
+    "isolatedModules": true, // Improves build tool compatibility, ensure TS knows modules are separate
 
     /* Strictness */
     "strict": true, // Enable all strict type-checking options
@@ -19,16 +19,17 @@
     "module": "CommonJS", // Standard Node.js module system for the output
 
     /* Output */
-    "outDir": "./dist",       // Output directory for compiled JS
-    "rootDir": "./src",       // Source directory for TS files
-    "declaration": true,      // Generate corresponding '.d.ts' file for types
-    "sourceMap": true,        // Generate '.map' source map files for debugging
+    "outDir": "./dist", // Output directory for compiled JS
+    "rootDir": "./src", // Source directory for TS files
+    "declaration": true, // Generate corresponding '.d.ts' file for types
+    "sourceMap": true, // Generate '.map' source map files for debugging
 
     /* Module Resolution */
-     "baseUrl": ".", // Base directory for non-relative imports (optional)
-     "paths": { // Aliases (optional, keep empty unless needed)
+    "baseUrl": ".", // Base directory for non-relative imports (optional)
+    "paths": {
+      // Aliases (optional, keep empty unless needed)
       // "@/*": ["./src/*"]
-     },
+    },
 
     /* Type Definitions */
     // Only include 'node' here. Jest types will be handled by the test runner environment.
@@ -43,10 +44,10 @@
   ],
   // Specify files and patterns to *exclude* from the compilation triggered by 'tsc'/'yarn build'
   "exclude": [
-    "node_modules",       // Always exclude node_modules
-    "dist",               // Exclude the output directory
-    "**/*.test.ts",       // Exclude all files ending in .test.ts
-    "**/__tests__/**/*",  // Exclude all contents within any __tests__ directory
-    "jest.config.js"      // Exclude the Jest configuration file itself
+    "node_modules", // Always exclude node_modules
+    "dist", // Exclude the output directory
+    "**/*.test.ts", // Exclude all files ending in .test.ts
+    "**/__tests__/**/*", // Exclude all contents within any __tests__ directory
+    "jest.config.js" // Exclude the Jest configuration file itself
   ]
 }
