@@ -1,160 +1,94 @@
-# Apply LLM Changes CLI (`apply-llm-changes`)
+# 🔄 Apply LLM Changes
 
-A command-line tool that reads structured file modification instructions from Large Language Model (LLM) output (via stdin) and applies them to the local filesystem in the current working directory.
+A command-line tool that applies file changes from LLM output to your local filesystem.
 
-This tool uses an LLM (like GPT models via OpenAI API, LM Studio, etc.) to determine the intended file path for standard markdown code blocks and explicitly handles `` tags directly, extracting the path and content. These tags take precedence over LLM-detected paths for the same file.
-*   **File System Operations:**
-    *   Writes extracted content to the specified relative paths within the current working directory.
-    *   Creates necessary directories automatically.
-    *   Normalizes paths (e.g., converts `\` to `/`).
-*   **Safety:** Rejects absolute paths or paths attempting to navigate outside the current directory (`../`).
-*   **Environment Variable Management:** Uses Infisical (via `infisical run`) to securely load API keys and other configurations from `.env` files.
-*   **Intelligent Configuration:** Automatically detects Infisical configuration in your working directory or falls back to running directly when not available.
+## ✨ Features
 
-## Supported Input Formats
+- 🤖 **AI-Powered Path Detection**: Uses LLM to determine file paths from markdown code blocks
+- 📁 **Explicit Path Support**: Handles `<file>` tags with direct path specification
+- 🔍 **Smart Configuration**: Auto-detects Infisical in your working directory
+- 🔒 **Secure**: Rejects absolute paths or directory traversal attempts
+- 🧠 **Context-Aware**: Preserves code context and formatting
 
-The tool processes input looking for these patterns:
+## 🚀 Quick Start
 
-1.  **Explicit `<file>` Tags:**
-    These tags provide a clear path and content. The path attribute is mandatory.
+1. **Install prerequisites**:
+   ```bash
+   # Optional but recommended for secrets management
+   npm install -g @infisical/cli
+   ```
 
-    ```xml
-    
-    ```
-    *(Note: The content inside the tags is written to the specified `path`.)*
+2. **Set up your environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your LLM API credentials
+   ```
 
-2.  **Standard Markdown Code Blocks:**
-    For fenced code blocks (``` ```), the tool sends the code snippet (and surrounding text context) to the configured LLM to determine the most likely relative file path.
+3. **Run the tool**:
+   ```bash
+   # Pipe LLM output from a file
+   cat llm_response.md | apply-llm-changes
+   
+   # Or paste content directly (press Ctrl+D when done)
+   apply-llm-changes
+   ```
 
-    ```markdown
-    Here's the updated utility function:
+## 📝 Input Formats
 
-    ```typescript
-    // src/utils/helpers.ts  <- LLM might infer path from comments or context
-    export function newHelper(): boolean {
-      console.log("Using new helper!");
-      return true;
-    }
-    ```
+### 1. Explicit File Tags
 
-    And the main application file:
+```xml
+<file path="src/utils/helper.js">
+function helper() {
+  return 'I help!';
+}
+export default helper;
+</file>
+```
 
-    ```javascript
-    // src/app.js
-    import { newHelper } from './utils/helpers';
+### 2. Markdown Code Blocks
 
-    console.log('App started');
-    newHelper();
-    ```
-    *(Note: The LLM's accuracy in determining the path depends on the model used and the clarity of the input context.)*
+The LLM will determine the most likely path based on context:
 
-**Precedence:** If both a `<file>` tag and a markdown block resolve to the same file path, the content from the `<file>` tag will be used, and the markdown block for that path will be skipped.
+```markdown
+Update the helper function:
 
-## Setup
+```javascript
+// src/utils/helper.js
+function helper() {
+  return 'I help even more!';
+}
+export default helper;
+```
+```
 
-1.  **Prerequisites:**
-    *   Node.js (See `.nvmrc` for the recommended version, use `nvm use` if you have nvm)
-    *   Yarn v1 (Classic)
-    *   Infisical CLI (optional, for environment variable management): `npm install -g @infisical/cli`
+## 🔧 Configuration
 
-2.  **Clone & Install:**
-    ```bash
-    git clone https://github.com/your-username/apply-llm-changes-cli.git # Replace with actual URL
-    cd apply-llm-changes-cli
-    yarn install
-    ```
+- **Environment Variables**: Configure in `.env` file
+  - `LLM_API_KEY`: Your API key
+  - `LLM_API_BASE_URL`: API endpoint URL
+  - `LLM_MODEL`: Model to use (optional)
 
-3.  **Configure Environment:**
-    *   Copy the example environment file: `cp .env.example .env`
-    *   Edit the `.env` file and provide your LLM credentials:
-        *   `LLM_API_KEY`: Your API key (e.g., `OPENAI_API_KEY` if using OpenAI). If the value is the *name* of another environment variable (like `OPENAI_API_KEY`), the tool will use the value of that variable.
-        *   `LLM_API_BASE_URL`: The base URL for your LLM API endpoint (e.g., `https://api.openai.com/v1/` or your LM Studio URL like `http://localhost:1234/v1/`).
-        *   `LLM_MODEL`: (Optional) The model identifier (e.g., `gpt-4o-mini`, `google/gemma-2-27b-it`). Defaults to `gpt-4o-mini`.
+- **Infisical Integration**:
+  - Tool automatically detects `.infisical.json` in your working directory
+  - Falls back to direct execution if not found
 
-4.  **(Optional) Infisical Setup:**
-    If you want to use Infisical for secret management:
-    ```bash
-    infisical login
-    ```
-    Follow the prompts. The tool will automatically detect `.infisical.json` in your working directory when applying changes. If no Infisical configuration is found, the tool will run directly without Infisical integration.
-    
-    The tool will check for Infisical configuration in the following order:
-    * First in the directory where you're applying changes (current working directory)
-    * Then in the tool's installation directory as a fallback
+## 🛠️ Development
 
-## Usage
+```bash
+# Build
+yarn build
 
-1.  **Generate LLM Output:** Obtain the file modification instructions from your LLM using one of the supported formats (`<file>` tags or markdown code blocks).
-2.  **Pipe or Paste to CLI:**
-    *   **Pipe:** If the output is in a file or from another command:
-        ```bash
-        cat llm_output.md | apply-llm-changes
-        # or
-        your_llm_command --prompt "update files..." | apply-llm-changes
-        ```
-    *   **Paste:** Run the command and paste the content directly into the terminal:
-        ```bash
-        apply-llm-changes
-        ```
-        (Paste your content here)
-        Then press `Ctrl+D` (Linux/macOS) or `Ctrl+Z` then `Enter` (Windows) to signal the end of input.
+# Test
+yarn test
 
-3.  **Review Changes:** The tool will log the files it intends to write (based on `<file>` tags or LLM responses) and any warnings or errors. Files will be created/overwritten in the *current working directory* (or subdirectories relative to it). **Always review changes made by automated tools.**
+# Link for global usage
+yarn link
 
-## Environment Variable Resolution
+# Run locally
+echo '```js\n// test.js\nconsole.log("Test");\n```' | yarn start
+```
 
-The tool looks for environment variables in the following order:
-1. From Infisical (if a `.infisical.json` configuration is found)
-2. From a `.env` file in the current working directory
-3. From a `.env` file in the tool's installation directory as a fallback
-
-## Local Development
-
-1.  **Setup:** Follow the Setup steps above.
-2.  **Build:** Compile TypeScript to JavaScript:
-    ```bash
-    yarn build
-    ```
-    (Output goes to the `dist/` directory. The `bin/apply-llm-changes.js` wrapper points to this.)
-3.  **Test:** Run the test suite (uses Infisical to load `.env` for LLM credentials):
-    ```bash
-    yarn test
-    ```
-4.  **Run Locally:** Execute the compiled script (using Infisical to load `.env`):
-    ```bash
-    # Example: Pipe test input
-    echo '' | yarn start
-    ```
-5.  **Linking for Global Use (`yarn link`):**
-    To test the `apply-llm-changes` command globally using your local code:
-    *   **Step 1: Create the link**
-        In the project directory:
-        ```bash
-        yarn link
-        ```
-    *   **Step 2: Add Yarn's global bin to PATH (If needed)**
-        Ensure Yarn's global binary directory is in your system `PATH`. Find the directory:
-        ```bash
-        yarn global bin
-        ```
-        Add this path to your shell's configuration (`.bashrc`, `.zshrc`, etc.) or system environment variables. See detailed instructions [here](https://classic.yarnpkg.com/en/docs/cli/global#toc-adding-the-install-location-to-your-path).
-    *   **Step 3: Test the linked command**
-        From any directory:
-        ```bash
-        echo '```js\n// linked-test.js\nconsole.log("Linked!");\n```' | apply-llm-changes
-        cat linked-test.js
-        ```
-    *   **Step 4: Develop and Rebuild**
-        Make code changes in `src/`. **Rebuild** after changes:
-        ```bash
-        yarn build
-        ```
-        The linked `apply-llm-changes` command will now use the updated code.
-    *   **Step 5: Unlink (When Done)**
-        ```bash
-        yarn unlink
-        ```
-
-## License
+## 📜 License
 
 MIT

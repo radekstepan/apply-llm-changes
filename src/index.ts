@@ -1,3 +1,4 @@
+// src/index.ts - Cleaned up version with improved .env and Infisical handling
 import * as fsPromises from 'fs/promises';
 import fs from 'fs';
 import * as path from 'node:path';
@@ -38,7 +39,6 @@ if (!fs.existsSync(envPath)) {
   const packageRoot = findPackageRoot(__dirname);
   envPath = path.join(packageRoot, '.env');
 }
-console.log(`Loading environment from: ${envPath}`);
 dotenv.config({ path: envPath });
 
 /**
@@ -46,7 +46,6 @@ dotenv.config({ path: envPath });
  * @returns A promise that resolves with the complete string content from stdin.
  */
 async function readStdin(): Promise<string> {
-  console.log('Reading from stdin...');
   let data = '';
   process.stdin.setEncoding('utf8');
   try {
