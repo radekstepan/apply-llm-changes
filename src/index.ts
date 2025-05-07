@@ -32,9 +32,14 @@ function findPackageRoot(startDir: string): string {
   return process.cwd();
 }
 
-// Load environment variables from .env file located at the project root
-const packageRoot = findPackageRoot(__dirname);
-dotenv.config({ path: path.join(packageRoot, '.env') });
+// Check for .env in the current working directory first, then fallback to package root
+let envPath = path.join(process.cwd(), '.env');
+if (!fs.existsSync(envPath)) {
+  const packageRoot = findPackageRoot(__dirname);
+  envPath = path.join(packageRoot, '.env');
+}
+console.log(`Loading environment from: ${envPath}`);
+dotenv.config({ path: envPath });
 
 /**
  * Reads all data piped into standard input.

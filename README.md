@@ -9,6 +9,7 @@ This tool uses an LLM (like GPT models via OpenAI API, LM Studio, etc.) to deter
     *   Normalizes paths (e.g., converts `\` to `/`).
 *   **Safety:** Rejects absolute paths or paths attempting to navigate outside the current directory (`../`).
 *   **Environment Variable Management:** Uses Infisical (via `infisical run`) to securely load API keys and other configurations from `.env` files.
+*   **Intelligent Configuration:** Automatically detects Infisical configuration in your working directory or falls back to running directly when not available.
 
 ## Supported Input Formats
 
@@ -54,7 +55,7 @@ The tool processes input looking for these patterns:
 1.  **Prerequisites:**
     *   Node.js (See `.nvmrc` for the recommended version, use `nvm use` if you have nvm)
     *   Yarn v1 (Classic)
-    *   Infisical CLI (for environment variable management): `npm install -g @infisical/cli`
+    *   Infisical CLI (optional, for environment variable management): `npm install -g @infisical/cli`
 
 2.  **Clone & Install:**
     ```bash
@@ -70,12 +71,16 @@ The tool processes input looking for these patterns:
         *   `LLM_API_BASE_URL`: The base URL for your LLM API endpoint (e.g., `https://api.openai.com/v1/` or your LM Studio URL like `http://localhost:1234/v1/`).
         *   `LLM_MODEL`: (Optional) The model identifier (e.g., `gpt-4o-mini`, `google/gemma-2-27b-it`). Defaults to `gpt-4o-mini`.
 
-4.  **(Optional) Infisical Login:**
-    If you plan to use Infisical for more advanced secret management (beyond the local `.env` file), log in:
+4.  **(Optional) Infisical Setup:**
+    If you want to use Infisical for secret management:
     ```bash
     infisical login
     ```
-    Follow the prompts. The `.infisical.json` file links this project to an Infisical workspace. The `infisical run` command used in scripts will automatically inject secrets based on your setup. For basic local `.env` usage, Infisical simply acts as a loader.
+    Follow the prompts. The tool will automatically detect `.infisical.json` in your working directory when applying changes. If no Infisical configuration is found, the tool will run directly without Infisical integration.
+    
+    The tool will check for Infisical configuration in the following order:
+    * First in the directory where you're applying changes (current working directory)
+    * Then in the tool's installation directory as a fallback
 
 ## Usage
 
@@ -95,6 +100,13 @@ The tool processes input looking for these patterns:
         Then press `Ctrl+D` (Linux/macOS) or `Ctrl+Z` then `Enter` (Windows) to signal the end of input.
 
 3.  **Review Changes:** The tool will log the files it intends to write (based on `<file>` tags or LLM responses) and any warnings or errors. Files will be created/overwritten in the *current working directory* (or subdirectories relative to it). **Always review changes made by automated tools.**
+
+## Environment Variable Resolution
+
+The tool looks for environment variables in the following order:
+1. From Infisical (if a `.infisical.json` configuration is found)
+2. From a `.env` file in the current working directory
+3. From a `.env` file in the tool's installation directory as a fallback
 
 ## Local Development
 

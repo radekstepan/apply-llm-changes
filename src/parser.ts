@@ -29,9 +29,13 @@ function findPackageRoot(startDir: string): string {
   return process.cwd(); // Fallback
 }
 
-// Load environment variables relative to the project root
-const packageRoot = findPackageRoot(__dirname);
-dotenv.config({ path: path.join(packageRoot, '.env') });
+// Check for .env in the current working directory first, then fallback to package root
+let envPath = path.join(process.cwd(), '.env');
+if (!fs.existsSync(envPath)) {
+  const packageRoot = findPackageRoot(__dirname);
+  envPath = path.join(packageRoot, '.env');
+}
+dotenv.config({ path: envPath });
 
 // Initialize LLM client using environment variables
 const rawKey = process.env.LLM_API_KEY;

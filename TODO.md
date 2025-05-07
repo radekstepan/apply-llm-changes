@@ -1,5 +1,0 @@
-- [ ] use npx export-path
-- [ ] remove <file path="packages/system/src/main.ts" /> tags
-- [ ] add a command to init the .env file and login to infisical
-- [ ] update README to have infisical instructions
-- [ ] rewrite
