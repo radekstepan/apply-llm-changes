@@ -33,35 +33,6 @@ A command-line tool that applies file changes from LLM output to your local file
    apply-llm-changes
    ```
 
-## 📝 Input Formats
-
-### 1. Explicit File Tags
-
-```xml
-<file path="src/utils/helper.js">
-function helper() {
-  return 'I help!';
-}
-export default helper;
-</file>
-```
-
-### 2. Markdown Code Blocks
-
-The LLM will determine the most likely path based on context:
-
-```markdown
-Update the helper function:
-
-```javascript
-// src/utils/helper.js
-function helper() {
-  return 'I help even more!';
-}
-export default helper;
-```
-```
-
 ## 🔧 Configuration
 
 - **Environment Variables**: Configure in `.env` file
