@@ -1,6 +1,6 @@
 {
   "name": "apply-llm-changes",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Applies file changes described in LLM output read from stdin.",
   "bin": {
     "apply-llm-changes": "bin/apply-llm-changes.js"

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import dotenv from 'dotenv';
 import { extractAllCodeBlocks } from './parser';
 import type { FilesMap } from './parser';
+import { stripJsonComments } from './utils'; // Import the new utility
 
 /**
  * Walks up the directory tree from startDir until it finds a 'package.json'
@@ -107,7 +108,10 @@ async function runCli() {
   const writePromises: Promise<boolean>[] = [];
 
   // Iterate through the map of files to write
-  for (const [relPath, { content }] of filesToWrite.entries()) {
+  for (const [
+    relPath,
+    { content: originalFileContent },
+  ] of filesToWrite.entries()) {
     // Security check: Ensure path is relative and doesn't try to escape cwd
     if (path.isAbsolute(relPath) || relPath.startsWith('..')) {
       console.error(`Error: Skipping potentially unsafe path "${relPath}"`);
@@ -122,11 +126,21 @@ async function runCli() {
       try {
         // Ensure the target directory exists
         await fsPromises.mkdir(path.dirname(dest), { recursive: true });
+
+        let contentToProcess = originalFileContent;
+
+        // If the file is a JSON file, strip comments
+        if (relPath.toLowerCase().endsWith('.json')) {
+          console.log(`Stripping comments from JSON file: ${relPath}`);
+          contentToProcess = stripJsonComments(contentToProcess);
+        }
+
         // Ensure content ends with a newline for POSIX compatibility
-        const contentToWrite = content.endsWith('\n')
-          ? content
-          : content + '\n';
-        await fsPromises.writeFile(dest, contentToWrite, 'utf8');
+        const finalContentToWrite = contentToProcess.endsWith('\n')
+          ? contentToProcess
+          : contentToProcess + '\n';
+
+        await fsPromises.writeFile(dest, finalContentToWrite, 'utf8');
         console.log(`Wrote ${relPath}`);
         return true; // Indicate success
       } catch (e: any) {
