@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import dotenv from 'dotenv';
 import { extractAllCodeBlocks } from './parser';
 import type { FilesMap } from './parser';
-import { stripJsonComments } from './utils'; // Import the new utility
+import { stripJsonComments, stripOuterMarkdownFences } from './utils'; // Import the new utility
 
 /**
  * Walks up the directory tree from startDir until it finds a 'package.json'
@@ -129,6 +129,14 @@ async function runCli() {
 
         let contentToProcess = originalFileContent;
 
+        // First, attempt to strip outer markdown fences if present
+        const strippedFencesContent =
+          stripOuterMarkdownFences(contentToProcess);
+        if (strippedFencesContent !== contentToProcess) {
+          console.log(`Stripped outer markdown fences for: ${relPath}`);
+          contentToProcess = strippedFencesContent;
+        }
+
         // If the file is a JSON file, strip comments
         if (relPath.toLowerCase().endsWith('.json')) {
           console.log(`Stripping comments from JSON file: ${relPath}`);
@@ -136,6 +144,7 @@ async function runCli() {
         }
 
         // Ensure content ends with a newline for POSIX compatibility
+        // If contentToProcess is empty after stripping, it becomes just a newline.
         const finalContentToWrite = contentToProcess.endsWith('\n')
           ? contentToProcess
           : contentToProcess + '\n';

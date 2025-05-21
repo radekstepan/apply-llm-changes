@@ -40,3 +40,45 @@ export function stripJsonComments(jsonString: string): string {
       .join('\n'); // Join them back
   }
 }
+
+/**
+ * Strips outer markdown code block fences if present.
+ * This function expects to receive content that was potentially extracted
+ * from an outer set of fences, and this content might itself be a full
+ * markdown code block (e.g. ```lang\ncode\n```).
+ * If so, it strips these "inner" fences to get the raw code.
+ *
+ * @param content The string content to process.
+ * @returns The content, potentially with its own markdown fences stripped.
+ */
+export function stripOuterMarkdownFences(content: string): string {
+  const lines = content.split('\n');
+
+  if (lines.length >= 2) {
+    const firstLine = lines[0]!.trimEnd();
+    const lastLine = lines[lines.length - 1]!.trim();
+
+    // Regex for the opening fence: ``` followed by optional language, then optional whitespace
+    const openingFenceRegex = /^```([\w.-]+)?\s*$/;
+
+    if (openingFenceRegex.test(firstLine) && lastLine === '```') {
+      // Extract content lines between the fences
+      let contentLines = lines.slice(1, -1);
+
+      // Remove blank lines from the beginning of the extracted content
+      while (contentLines.length > 0 && contentLines[0]!.trim() === '') {
+        contentLines.shift();
+      }
+      // Remove blank lines from the end of the extracted content
+      while (
+        contentLines.length > 0 &&
+        contentLines[contentLines.length - 1]!.trim() === ''
+      ) {
+        contentLines.pop();
+      }
+      return contentLines.join('\n');
+    }
+  }
+  // If not a block that itself is wrapped in fences, return original content
+  return content;
+}

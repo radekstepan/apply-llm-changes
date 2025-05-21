@@ -1,5 +1,5 @@
 // __tests__/utils.test.ts
-import { stripJsonComments } from '../src/utils';
+import { stripJsonComments, stripOuterMarkdownFences } from '../src/utils';
 
 describe('stripJsonComments', () => {
   it('should remove single-line comments and reformat', () => {
@@ -149,5 +149,103 @@ describe('stripJsonComments', () => {
   "valid": false
 }`;
     expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
+  });
+});
+
+describe('stripOuterMarkdownFences', () => {
+  it('should strip basic double fences (content is a markdown block)', () => {
+    const input = '```tsx\nconst a = 1;\n```';
+    const expected = 'const a = 1;';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should strip double fences with language specifier (content is a markdown block)', () => {
+    const input = '```javascript\nconsole.log("hello");\n```';
+    const expected = 'console.log("hello");';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should strip double fences with extra newlines inside and trim result (content is a markdown block with surrounding newlines)', () => {
+    const input = '```text\n\nInner content.\n\n```'; // Inner content has blank lines around it
+    const expected = 'Inner content.';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should handle double fences where content is just newlines, resulting in empty string', () => {
+    const input = '```\n\n```'; // Inner content is one blank line
+    const expected = ''; // After stripping outer fences and inner blank line
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should handle double fences where content is effectively empty, resulting in empty string', () => {
+    const input = '```\n```'; // No actual content lines between fences
+    const expected = '';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should not strip if not a double fence (only start)', () => {
+    const input = '```typescript\nconst b = 2;\n```\nSome other text.';
+    expect(stripOuterMarkdownFences(input)).toBe(input);
+  });
+
+  it('should not strip if not a double fence (only end)', () => {
+    const input = 'Some text.\n```\nconst c = 3;\n```';
+    expect(stripOuterMarkdownFences(input)).toBe(input);
+  });
+
+  it('should not strip if no fences are present (plain text)', () => {
+    const input = 'Just regular text.';
+    expect(stripOuterMarkdownFences(input)).toBe(input);
+  });
+
+  it('should not strip content that is too short to be a fenced block (e.g. just one line fence)', () => {
+    const input = '```tsx';
+    expect(stripOuterMarkdownFences(input)).toBe(input);
+  });
+
+  it('should not strip empty string', () => {
+    const input = '';
+    expect(stripOuterMarkdownFences(input)).toBe(input);
+  });
+
+  it('should handle opening fence with trailing spaces', () => {
+    const input = '```tsx  \n// code\n```';
+    const expected = '// code';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  // This test's name and expectation are updated.
+  // It tests the case where the `content` given to the function
+  // IS a markdown block itself (which happens in a double-wrapped scenario).
+  it('should strip content that is itself a complete markdown code block', () => {
+    const input =
+      '```typescript\n// This is a normal code block\nfunction test() {}\n```';
+    const expected = '// This is a normal code block\nfunction test() {}';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  // This test should now pass with the improved trimming logic.
+  it('should correctly strip content with internal leading/trailing spaces on lines but preserve them', () => {
+    const input = '```\n  Indented line 1\n  Indented line 2\n```';
+    const expected = '  Indented line 1\n  Indented line 2';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should strip fences with hyphens or dots in language', () => {
+    const input = '```objective-c.old\n// code\n```';
+    const expected = '// code';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should strip fences when first line is just ``` (no language)', () => {
+    const input = '```\ncontent\n```';
+    const expected = 'content';
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  });
+
+  it('should handle content with only spaces between fences', () => {
+    const input = '```\n  \n```'; // Inner content is a line with only spaces
+    const expected = ''; // Should become empty after trimming blank lines
+    expect(stripOuterMarkdownFences(input)).toBe(expected);
   });
 });
