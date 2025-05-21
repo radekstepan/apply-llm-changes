@@ -43,6 +43,7 @@ const rawKey = process.env.LLM_API_KEY;
 const apiKey = rawKey && process.env[rawKey] ? process.env[rawKey] : rawKey;
 const baseURL = process.env.LLM_API_BASE_URL;
 const model = process.env.LLM_MODEL || 'gpt-4.1-mini-2025-04-14'; // Default model
+const FOLDER_HINT_MAX_DEPTH = parseInt(process.env.FOLDER_HINT_MAX_DEPTH || "3");
 
 let client: OpenAI | null = null;
 if (apiKey && baseURL) {
@@ -102,8 +103,83 @@ function normalizeAndValidatePath(
  * @returns A promise resolving to the determined relative file path (using forward slashes) or 'NO_PATH' if unable to determine or an error occurs.
  */
 export async function determineFilePath(snippet: string): Promise<string> {
+// --- Folder Structure Hinting ---
+
+/**
+ * Recursively scans a directory and generates a string representation of its structure.
+ * @param dirPath The path to the directory to scan.
+ * @param maxDepth The maximum depth of directories to scan.
+ * @param currentDepth The current depth of recursion (used internally).
+ * @param prefix The prefix for the current line (used internally).
+ * @returns A string representing the folder structure.
+ */
+function scanDir(
+  dirPath: string,
+  maxDepth: number,
+  currentDepth: number = 0,
+  prefix: string = ''
+): string {
+  if (currentDepth > maxDepth) {
+    return '';
+  }
+
+  let structure = '';
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const filteredEntries = entries.filter(
+      (entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules'
+    );
+
+    for (let i = 0; i < filteredEntries.length; i++) {
+      const entry = filteredEntries[i];
+      const entryPrefix = prefix + (i === filteredEntries.length - 1 ? '`-- ' : '|-- ');
+      const entryName = entry.isDirectory() ? `${entry.name}/` : entry.name;
+      structure += `${entryPrefix}${entryName}\n`;
+      if (entry.isDirectory()) {
+        const nestedPrefix = prefix + (i === filteredEntries.length - 1 ? '    ' : '|   ');
+        structure += scanDir(
+          path.join(dirPath, entry.name),
+          maxDepth,
+          currentDepth + 1,
+          nestedPrefix
+        );
+      }
+    }
+  } catch (error: any) {
+    // console.warn(`Could not read directory ${dirPath}: ${error.message}`);
+    // Silently ignore errors for individual directory reads to make it robust
+  }
+  return structure;
+}
+
+/**
+ * Generates a hint string representing the folder structure of the project.
+ * @param rootDir The root directory of the project.
+ * @param maxDepth The maximum depth to scan for the folder structure.
+ * @returns A string with the folder structure hint, or an empty string if an error occurs.
+ */
+export function getFolderStructureHint(rootDir: string, maxDepth: number = 2): string {
+  if (maxDepth < 0) return ''; // No negative depth
+  let hint = "Project folder structure (up to " + maxDepth + " levels deep):\n/\n";
+  try {
+    hint += scanDir(rootDir, maxDepth, 0, '');
+    return hint;
+  } catch (error: any) {
+    console.warn(`Error generating folder structure hint: ${error.message}`);
+    return ''; // Return empty string if top-level scan fails
+  }
+}
+
+
+// --- Path Determination ---
+
+/**
+ * Uses the configured LLM to determine a relative file path for a given code snippet.
+ * @param snippet The code snippet (potentially with surrounding context).
+ * @returns A promise resolving to the determined relative file path (using forward slashes) or 'NO_PATH' if unable to determine or an error occurs.
+ */
+export async function determineFilePath(snippet: string): Promise<string> {
   if (!client) {
-    // Log error but return NO_PATH to allow processing of <file> tags
     console.error(
       'LLM client not initialized. Cannot determine path for markdown block.'
     );
@@ -116,21 +192,36 @@ export async function determineFilePath(snippet: string): Promise<string> {
       .replace(/\n/g, '\\n')}..."`
   );
 
+  const projectRoot = findPackageRoot(__dirname);
+  const folderHint = getFolderStructureHint(projectRoot, FOLDER_HINT_MAX_DEPTH);
+
+  const systemMessages = [
+    'You are an assistant that assigns the full relative file path to a code snippet.',
+    'Analyze the snippet content and any surrounding context provided.',
+    'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js) based on common project structures, comments, or import statements within the snippet.',
+    'Ensure the path is relative to a project root and uses forward slashes (/).',
+    'Do not include absolute paths (e.g., /home/user/...) or URLs.',
+  ];
+
+  if (folderHint) {
+    systemMessages.push(
+      'Here is the current folder structure of the project to help you determine the path. Please use this as a strong hint:',
+      folderHint
+    );
+  }
+
+  systemMessages.push(
+    'If you cannot confidently determine a reasonable file path for the snippet, respond with exactly the string NO_PATH.',
+    'Do not add any explanation, preamble, or markdown formatting to your response. Respond only with the path or NO_PATH.'
+  );
+
   try {
     const resp = await client.chat.completions.create({
       model,
       messages: [
         {
           role: 'system',
-          content: [
-            'You are an assistant that assigns the full relative file path to a code snippet.',
-            'Analyze the snippet content and any surrounding context provided.',
-            'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js) based on common project structures, comments, or import statements within the snippet.',
-            'Ensure the path is relative to a project root and uses forward slashes (/).',
-            'Do not include absolute paths (e.g., /home/user/...) or URLs.',
-            'If you cannot confidently determine a reasonable file path for the snippet, respond with exactly the string NO_PATH.',
-            'Do not add any explanation, preamble, or markdown formatting to your response. Respond only with the path or NO_PATH.',
-          ].join(' '),
+          content: systemMessages.join(' '),
         },
         {
           role: 'user',

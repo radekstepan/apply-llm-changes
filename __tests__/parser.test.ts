@@ -1,9 +1,11 @@
-import * as fs from 'fs/promises';
+import * as fsPromises from 'fs/promises'; // Renamed to avoid conflict
+import * as fsSync from 'node:fs'; // For readdirSync
 import * as path from 'path';
+import OpenAI from 'openai'; // For spying on the OpenAI client
 import type { FilesMap, FileData } from '../src/parser'; // Import the types
 
 // Import the actual functions from the module
-import { extractAllCodeBlocks, determineFilePath } from '../src/parser';
+import * as parser from '../src/parser';
 
 // --- Configuration ---
 jest.setTimeout(60000); // 60 seconds per test
@@ -11,7 +13,7 @@ jest.setTimeout(60000); // 60 seconds per test
 // --- Helper Functions ---
 const readFixture = (fixtureName: string): Promise<string> => {
   const fixturePath = path.join(__dirname, 'fixtures', fixtureName);
-  return fs.readFile(fixturePath, 'utf-8');
+  return fsPromises.readFile(fixturePath, 'utf-8');
 };
 
 const findEntryByContentSubstring = (
@@ -27,528 +29,409 @@ const findEntryByContentSubstring = (
   return undefined;
 };
 
-// --- Test Suite ---
-describe('extractAllCodeBlocks (Integration with Real LLM - Returning Map)', () => {
-  // No longer need beforeEach to reset an external map
+// --- Test Suite for extractAllCodeBlocks (existing tests with determineFilePath mocked) ---
+describe('extractAllCodeBlocks (Mocked LLM - Returning Map)', () => {
+  let determineFilePathSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    // This spy mocks the entire determineFilePath function for this suite
+    determineFilePathSpy = jest.spyOn(parser, 'determineFilePath');
+    determineFilePathSpy.mockResolvedValue('DEFAULT_MOCKED_PATH');
+  });
+
+  afterEach(() => {
+    determineFilePathSpy.mockRestore();
+  });
 
   it('Fixture: markdown_backticks_in_code.md', async () => {
     const input = await readFixture('markdown_backticks_in_code.md');
-    const expectedSubstrings = [
-      'function cleanInput(input)',
-      '.extra-class {',
-      'key: value',
-      'echo "Combo"',
-      'Just the start fence',
-    ];
-    const expectedValidBlockCount = 5;
+    const expectedMarkdownBlockCount = 5; 
 
-    // Call the function and get the result map
-    const filesToWrite = await extractAllCodeBlocks(input);
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
+    expect(filesToWrite.size).toBe(1); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(expectedMarkdownBlockCount);
 
-    for (const substring of expectedSubstrings) {
-      const entry = findEntryByContentSubstring(filesToWrite, substring);
-      expect(entry).toBeDefined();
-      if (entry) {
-        const [actualPath, fileData] = entry;
-        console.log(
-          `[markdown_backticks_in_code] Found block containing "${substring}" -> Path: ${actualPath}`
-        );
-        expect(actualPath).not.toBe('NO_PATH');
-        expect(typeof actualPath).toBe('string');
-        expect(actualPath.length).toBeGreaterThan(0);
-        expect(fileData.format).toContain('markdown code block');
-        expect(fileData.content).toContain(substring);
-      }
-    }
+    const lastBlockData = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(lastBlockData).toBeDefined();
+    expect(lastBlockData!.content).toContain('Just the start fence'); 
+    expect(lastBlockData!.format).toContain('markdown code block');
   });
-
-  // --- Add similar modifications for ALL other test cases ---
-  // Example for one more test case:
 
   it('Fixture: markdown_double_comments.md', async () => {
     const input = await readFixture('markdown_double_comments.md');
-    const expectedSubstrings = ['Chat/ChatMessages.tsx', 'styles/global.css'];
-    const expectedValidBlockCount = 2;
+    const expectedMarkdownBlockCount = 2;
 
-    // Call the function and get the result map
-    const filesToWrite = await extractAllCodeBlocks(input);
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
+    expect(filesToWrite.size).toBe(1); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(expectedMarkdownBlockCount);
 
-    for (const substring of expectedSubstrings) {
-      const entry = findEntryByContentSubstring(filesToWrite, substring);
-      expect(entry).toBeDefined();
-      if (entry) {
-        const [actualPath, fileData] = entry;
-        console.log(
-          `[markdown_double_comments] Found block containing "${substring}" -> Path: ${actualPath}`
-        );
-        expect(actualPath).not.toBe('NO_PATH');
-        expect(typeof actualPath).toBe('string');
-        expect(fileData.format).toContain('markdown code block');
-        expect(fileData.content).toContain(substring);
-      }
-    }
+    const lastBlockData = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(lastBlockData).toBeDefined();
+    expect(lastBlockData!.content).toContain('body {'); 
+    expect(lastBlockData!.format).toContain('markdown code block');
   });
 
-  // ... repeat the pattern for markdown_first_line_comment_path.md ...
   it('Fixture: markdown_first_line_comment_path.md', async () => {
     const input = await readFixture('markdown_first_line_comment_path.md');
-    const expectedSubstrings = [
-      'dockerManager.ts',
-      'process_data.py',
-      'styles/layout.css',
-      'Transcription/Transcription.tsx',
-      'api/sessionHandler.ts',
-    ];
-    const expectedValidBlockCount = 5;
+    const expectedNumberOfMarkdownBlocks = 5; 
 
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    console.log(
-      `[markdown_first_line_comment_path] Found ${filesToWrite.size} blocks (expected approx ${expectedValidBlockCount})`
-    );
-    expect(filesToWrite.size).toBeGreaterThanOrEqual(
-      expectedValidBlockCount - 1
-    );
-    expect(filesToWrite.size).toBeLessThanOrEqual(expectedValidBlockCount + 1);
+    expect(filesToWrite.size).toBe(1); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(expectedNumberOfMarkdownBlocks);
 
-    for (const substring of expectedSubstrings) {
-      const entry = findEntryByContentSubstring(filesToWrite, substring);
-      expect(entry).toBeDefined();
-      if (entry) {
-        const [actualPath, fileData] = entry;
-        console.log(
-          `[markdown_first_line_comment_path] Found block containing "${substring}" -> Path: ${actualPath}`
-        );
-        expect(actualPath).not.toBe('NO_PATH');
-        expect(typeof actualPath).toBe('string');
-        expect(fileData.format).toContain('markdown code block');
-        expect(fileData.content).toContain(substring);
-      }
-    }
-
-    const config = findEntryByContentSubstring(filesToWrite, 'src/config.js');
-
-    expect(config).toBeDefined();
-
-    expect(config![0]).toEqual('src/config.js');
-    expect(config![1].content).toContain('const config = {};');
+    const lastBlockInMap = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(lastBlockInMap).toBeDefined();
+    expect(lastBlockInMap!.content).toContain('`DELETE /api/session`');
+    expect(lastBlockInMap!.content).toContain('<!-- path: api/sessionHandler.ts -->');
+    expect(lastBlockInMap!.format).toContain('markdown code block');
+    
+    expect(input).toContain('<!-- path: src/config.js -->');
+    expect(input).toContain('const config = {};');
 
     expect(
       findEntryByContentSubstring(filesToWrite, '../../etc/passwd')
     ).toBeUndefined();
   });
 
-  // ... front_matter ...
   it('Fixture: markdown_front_matter_path.md', async () => {
     const input = await readFixture('markdown_front_matter_path.md');
-    // const expectedSubstringHint = 'packages/api/src/db/sqliteService.ts'; // Hint removed as LLM determines path
     const expectedCodeSubstring = 'better-sqlite3';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_front_matter_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... header_comment ...
   it('Fixture: markdown_header_comment_path.md', async () => {
     const input = await readFixture('markdown_header_comment_path.md');
-    // const expectedSubstringHint = 'src/__tests__/utils/headerCommentUtil.test.ts'; // Hint removed
     const expectedCodeSubstring = '@jest/globals';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_header_comment_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... heading ...
   it('Fixture: markdown_heading_path.md', async () => {
     const input = await readFixture('markdown_heading_path.md');
-    // const expectedSubstringHint = 'styles/main.css'; // Hint removed
     const expectedCodeSubstring = 'background-color';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_heading_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... list_item_invalid ...
   it('Fixture: markdown_list_item_invalid_path.md', async () => {
     const input = await readFixture('markdown_list_item_invalid_path.md');
     const validSubstring = 'ValidComponent';
-    const invalidSubstrings = [
-      'Skipped code 1',
-      'Skipped content 2',
-      'block has no path',
-    ];
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-
-    const entry = findEntryByContentSubstring(filesToWrite, validSubstring);
+    
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1); 
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_list_item_invalid_path] Found block containing "${validSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(validSubstring);
-    }
+    expect(entry!.content).toContain(validSubstring);
+    expect(entry!.format).toContain('markdown code block');
 
-    for (const substring of invalidSubstrings) {
-      expect(
-        findEntryByContentSubstring(filesToWrite, substring)
-      ).toBeUndefined();
-    }
+    expect(findEntryByContentSubstring(filesToWrite, 'Skipped code 1')).toBeUndefined();
+    expect(findEntryByContentSubstring(filesToWrite, 'Skipped content 2')).toBeUndefined();
   });
 
-  // ... paragraph ...
   it('Fixture: markdown_paragraph_path.md', async () => {
     const input = await readFixture('markdown_paragraph_path.md');
-    // const expectedSubstringHint = 'src/app.js'; // Hint removed
     const expectedCodeSubstring = 'Hello World!';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_paragraph_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... real_life_1 (MODIFIED TEST) ...
   it('Fixture: markdown_real_life_1.md', async () => {
     const input = await readFixture('markdown_real_life_1.md');
-    // This block is now skipped due to <file> tags
-    const skippedSubstring = 'export default config;';
-    const expectedValidBlockCount = 1;
+    // This fixture has one <file> block (vite.config.ts) and one markdown block.
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
+    expect(filesToWrite.size).toBe(2); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1); 
 
-    expect(filesToWrite.size).toBe(1);
-    // Ensure the skipped block is not present
-    expect(
-      findEntryByContentSubstring(filesToWrite, skippedSubstring)
-    ).toBeDefined();
+    const fileTagEntry = filesToWrite.get('vite.config.ts');
+    expect(fileTagEntry).toBeDefined();
+    expect(fileTagEntry!.content).toContain('export default config;');
+    expect(fileTagEntry!.format).toContain('explicit <file> tag');
+
+    const markdownEntry = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(markdownEntry).toBeDefined();
+    expect(markdownEntry!.content).toContain('This is a markdown code block');
+    expect(markdownEntry!.format).toContain('markdown code block');
   });
 
-  // ... standalone ...
   it('Fixture: markdown_standalone_path.md', async () => {
     const input = await readFixture('markdown_standalone_path.md');
-    // const expectedSubstringHint = 'path/to/my_script.py'; // Hint removed
     const expectedCodeSubstring = 'if __name__ == "__main__":';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[markdown_standalone_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... mixed ...
   it('Fixture: mixed_blocks.md', async () => {
     const input = await readFixture('mixed_blocks.md');
-    // const expectedSubstringHint = 'scripts/run.sh'; // Hint removed
-    const expectedCodeSubstring = 'node dist/index.js';
-    const expectedValidBlockCount = 3;
+    const expectedCodeSubstringMarkdown = 'node dist/index.js';
 
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
-    expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[mixed_blocks] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
+    expect(filesToWrite.size).toBe(3);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(2);
+
+    const fileTagEntry = filesToWrite.get('config/settings.yaml');
+    expect(fileTagEntry).toBeDefined();
+    expect(fileTagEntry!.content).toContain('START OF config/settings.yaml');
+    expect(fileTagEntry!.format).toContain('explicit <file> tag');
+    
+    const defaultPathEntry = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(defaultPathEntry).toBeDefined();
+    const isDefaultPathMarkdown = defaultPathEntry!.content.includes(expectedCodeSubstringMarkdown);
+    const isDefaultPathCustomComment = defaultPathEntry!.content.includes('# Project Docs');
+    expect(isDefaultPathMarkdown || isDefaultPathCustomComment).toBe(true); 
+    
+    if (isDefaultPathMarkdown) {
+        expect(defaultPathEntry!.format).toContain('markdown code block');
+    } else if (isDefaultPathCustomComment) {
+        expect(defaultPathEntry!.format).toContain('custom comment');
     }
-    // These blocks should not be found (one is <file> tag, one is custom comment)
-    expect(
-      findEntryByContentSubstring(filesToWrite, 'START OF config/settings.yaml')
-    ).toBeUndefined();
-    expect(
-      findEntryByContentSubstring(filesToWrite, '# Project Docs')
-    ).toBeUndefined(); // This is inside <file> tag in markdown
   });
 
-  // ... no_path ...
   it('Fixture: no_path.md', async () => {
     const input = await readFixture('no_path.md');
-    const expectedCodeSubstring = 'Some plain text content'; // Expect this block to be processed by LLM
-    const expectedValidBlockCount = 1; // Expect LLM might find a path or return NO_PATH
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    // We can't guarantee LLM *won't* find a path, so check size >= 0
-    expect(filesToWrite.size).toBeLessThanOrEqual(expectedValidBlockCount);
-
-    if (filesToWrite.size === 1) {
-      const entry = findEntryByContentSubstring(
-        filesToWrite,
-        expectedCodeSubstring
-      );
-      expect(entry).toBeDefined();
-      if (entry) {
-        const [actualPath, fileData] = entry;
-        console.log(
-          `[no_path] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-        );
-        // Path could be NO_PATH or something LLM determined
-        expect(typeof actualPath).toBe('string');
-        expect(fileData.format).toContain('markdown code block');
-        expect(fileData.content).toContain(expectedCodeSubstring);
-      }
-    } else {
-      console.log(
-        `[no_path] Correctly found ${filesToWrite.size} blocks (LLM returned NO_PATH).`
-      );
-      expect(
-        findEntryByContentSubstring(filesToWrite, expectedCodeSubstring)
-      ).toBeUndefined();
-    }
+    const expectedCodeSubstring = 'Some plain text content';
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(entry).toBeDefined();
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
   });
 
-  // ... path_normalization ...
   it('Fixture: path_normalization.md', async () => {
     const input = await readFixture('path_normalization.md');
-    // const expectedSubstringHint = 'src\\\\utils\\\\helpers.ts'; // Hint removed
     const expectedCodeSubstring = 'export const helper';
-    const expectedValidBlockCount = 1;
-
-    const filesToWrite = await extractAllCodeBlocks(input); // Get returned map
-
-    expect(filesToWrite.size).toBe(expectedValidBlockCount);
-    const entry = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
+    expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(1);
+    const entry = filesToWrite.get('DEFAULT_MOCKED_PATH');
     expect(entry).toBeDefined();
-    if (entry) {
-      const [actualPath, fileData] = entry;
-      console.log(
-        `[path_normalization] Found block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH');
-      expect(typeof actualPath).toBe('string');
-      expect(actualPath.length).toBeGreaterThan(0);
-      // Expect normalized path (forward slashes)
-      expect(actualPath).not.toContain('\\');
-      expect(fileData.format).toContain('markdown code block');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-    }
+    expect(entry!.content).toContain(expectedCodeSubstring);
+    expect(entry!.format).toContain('markdown code block');
+    expect(entry!.path).not.toContain('\\'); 
   });
 
-  // --- Test for <file> tags ---
   it('Fixture: markdown_file_tags.md', async () => {
     const input = await readFixture('markdown_file_tags.md');
     const expectedFilePath = 'packages/skip/this.ts';
     const expectedCodeSubstring = 'console.log("Skipped")';
 
-    const filesToWrite = await extractAllCodeBlocks(input);
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
     expect(filesToWrite.size).toBe(1);
+    expect(determineFilePathSpy).not.toHaveBeenCalled();
 
-    // Check the valid block
-    const entry1 = findEntryByContentSubstring(
-      filesToWrite,
-      expectedCodeSubstring
-    );
-    expect(entry1).toBeDefined();
-    if (entry1) {
-      const [actualPath, fileData] = entry1;
-      console.log(
-        `[markdown_file_tags] Found valid block containing "${expectedCodeSubstring}" -> Path: ${actualPath}`
-      );
-      expect(actualPath).not.toBe('NO_PATH'); // LLM should assign a path
-      expect(fileData.format).toContain('explicit <file> tag');
-      expect(fileData.content).toContain(expectedCodeSubstring);
-      expect(fileData.content).not.toContain('<file path=');
-      expect(fileData.content).not.toContain('</file');
+    const entry = filesToWrite.get(expectedFilePath); 
+    expect(entry).toBeDefined();
+    if (entry) {
+      expect(entry.format).toContain('explicit <file> tag');
+      expect(entry.content).toContain(expectedCodeSubstring);
+      expect(entry.content).not.toContain('<file path=');
+      expect(entry.content).not.toContain('</file');
     }
   });
 
-  // --- NEW TEST CASE for double wrapped fences ---
   it('Fixture: markdown_double_wrapper_fences.md', async () => {
     const input = await readFixture('markdown_double_wrapper_fences.md');
-    const expectedBlocks = [
-      {
-        pathHint: 'src/component.tsx',
-        contentSubstring: 'MyComponent',
-        shouldHaveOuterFences: true,
-      },
-      {
-        pathHint: 'src/utils.js',
-        contentSubstring: 'function greet()',
-        shouldHaveOuterFences: true,
-      },
-      {
-        pathHint: 'src/just_one_line_inside.txt',
-        contentSubstring: 'hello',
-        shouldHaveOuterFences: true,
-      },
-      {
-        pathHint: 'src/no_double_wrapping.md',
-        contentSubstring: 'standard markdown block',
-        shouldHaveOuterFences: false,
-      },
-      {
-        pathHint: 'src/fenced_json.json',
-        contentSubstring: '"doubly_wrapped_json"',
-        shouldHaveOuterFences: true,
-      },
-    ];
-    // The number of blocks LLM is expected to find (it might not find paths for all, but should extract content)
-    // All blocks in the fixture are standard markdown code blocks, so LLM will try to assign paths.
-    const expectedTotalBlockCount = expectedBlocks.length;
+    const expectedMarkdownBlockCount = 5; 
 
-    const filesToWrite = await extractAllCodeBlocks(input);
+    const filesToWrite = await parser.extractAllCodeBlocks(input);
 
-    expect(filesToWrite.size).toBeGreaterThanOrEqual(
-      expectedTotalBlockCount - 2
-    ); // Allow some flexibility if LLM fails on a couple
-    expect(filesToWrite.size).toBeLessThanOrEqual(expectedTotalBlockCount + 1);
+    expect(filesToWrite.size).toBe(1); 
+    expect(determineFilePathSpy).toHaveBeenCalledTimes(expectedMarkdownBlockCount);
 
-    for (const expected of expectedBlocks) {
-      const entry = findEntryByContentSubstring(
-        filesToWrite,
-        expected.contentSubstring
-      );
-      expect(entry).toBeDefined();
-      if (entry) {
-        const [actualPath, fileData] = entry;
-        console.log(
-          `[markdown_double_wrapper_fences] Found block for "${expected.pathHint}" (substring: "${expected.contentSubstring}") -> Path: ${actualPath}`
-        );
-        expect(actualPath).not.toBe('NO_PATH'); // LLM should assign paths
-        expect(fileData.format).toContain('markdown code block');
+    const lastBlockData = filesToWrite.get('DEFAULT_MOCKED_PATH');
+    expect(lastBlockData).toBeDefined();
+    expect(lastBlockData!.content).toContain('"doubly_wrapped_json"');
+    expect(lastBlockData!.format).toContain('markdown code block');
+  });
+});
 
-        if (expected.isContentExact) {
-          // Content between fences in fixture is "\n", so fileData.content is "```\n\n```"
-          if (expected.pathHint === 'src/empty_inside.txt') {
-            expect(fileData.content.trim()).toBe('```\n\n```');
-          } else {
-            expect(fileData.content).toBe(expected.contentSubstring);
-          }
-        } else {
-          expect(fileData.content).toContain(expected.contentSubstring);
-        }
+// --- Test Suite for determineFilePath with Folder Structure Hinting ---
+describe('determineFilePath with Folder Structure Hint', () => {
+  let openAICreateSpy: jest.SpyInstance;
+  let readdirSyncSpy: jest.SpyInstance | undefined; 
+  let findPackageRootSpy: jest.SpyInstance;
+  let consoleWarnSpy: jest.SpyInstance;
+  let originalFolderHintMaxDepth: number;
 
-        // Check if outer fences are present as expected in the *parser output*
-        // The stripping happens later, in index.ts
-        const startsWithFence = /^```([\w.-]+)?\s*\n/.test(fileData.content);
-        const endsWithFence = /\n```\s*$/.test(fileData.content.trimEnd()); // trimEnd for last line content
 
-        if (expected.shouldHaveOuterFences) {
-          // For this test, we check if the content *extracted by the parser* still has the fences
-          expect(startsWithFence).toBe(true);
-          // A bit more robust check for the end fence, ensuring it's on its own line basically
-          const lines = fileData.content.split('\n');
-          expect(lines.length).toBeGreaterThanOrEqual(2); // Must have at least two lines for outer fences
-          expect(lines[lines.length - 1].trim()).toBe('```');
-        } else {
-          // If not expected to have outer fences (e.g. standard block), then it shouldn't match both conditions
-          // Or more simply, if it's a single block, it might start with ``` and end with ```, but not "doubly"
-          // This test focuses on what the parser extracts. The stripping is tested in utils.test.ts
-        }
-      }
+  beforeEach(() => {
+    jest.restoreAllMocks(); // Clean slate for mocks
+
+    openAICreateSpy = jest.spyOn(OpenAI.Chat.Completions.prototype, 'create');
+    openAICreateSpy.mockResolvedValue({
+      choices: [{ message: { content: 'MOCKED_LLM_GENERATED_PATH' } }],
+    } as any);
+
+    findPackageRootSpy = jest.spyOn(parser, 'findPackageRoot');
+    findPackageRootSpy.mockReturnValue('/test/project/root'); // Consistent root
+
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    
+    // Temporarily store and override FOLDER_HINT_MAX_DEPTH if it's exported and mutable
+    // For this test, we'll assume it's accessible for modification or use a default
+    // if direct modification isn't possible. This is a simplification for the test.
+    originalFolderHintMaxDepth = (parser as any).FOLDER_HINT_MAX_DEPTH || 3;
+  });
+
+  afterEach(() => {
+    openAICreateSpy.mockRestore();
+    if (readdirSyncSpy) {
+      readdirSyncSpy.mockRestore();
+      readdirSyncSpy = undefined;
     }
+    findPackageRootSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    // Restore FOLDER_HINT_MAX_DEPTH if it was changed
+     ((parser as any).FOLDER_HINT_MAX_DEPTH) = originalFolderHintMaxDepth;
+  });
+
+  it('should include folder structure hint in the LLM prompt when hint is generated', async () => {
+    const mockProjectRoot = '/test/project/root';
+    ((parser as any).FOLDER_HINT_MAX_DEPTH) = 2; // Set for this test
+    
+    readdirSyncSpy = jest.spyOn(fsSync, 'readdirSync');
+    readdirSyncSpy.mockImplementation((dirPath: fsSync.PathLike) => {
+      const currentPath = dirPath.toString();
+      if (currentPath === mockProjectRoot) {
+        return [
+          { name: 'src', isDirectory: () => true, isFile: () => false } as fsSync.Dirent,
+          { name: 'package.json', isDirectory: () => false, isFile: () => true } as fsSync.Dirent,
+        ];
+      } else if (currentPath === path.join(mockProjectRoot, 'src')) {
+        return [
+          { name: 'myFile.ts', isDirectory: () => false, isFile: () => true } as fsSync.Dirent,
+          { name: 'components', isDirectory: () => true, isFile: () => false } as fsSync.Dirent,
+        ];
+      } else if (currentPath === path.join(mockProjectRoot, 'src', 'components')) {
+         // This level (depth 2) should not be reached if maxDepth is 1 for getFolderStructureHint call
+         // but scanDir itself is called with currentDepth starting at 0 for root.
+         // For FOLDER_HINT_MAX_DEPTH = 2 (meaning scanDir maxDepth = 2)
+         // root (depth 0) -> src (depth 1) -> components (depth 2)
+        return [
+          { name: 'Button.tsx', isDirectory: () => false, isFile: () => true } as fsSync.Dirent,
+        ];
+      }
+      return []; 
+    });
+
+    await parser.determineFilePath("console.log('test snippet');");
+
+    expect(openAICreateSpy).toHaveBeenCalled();
+    const createArgs = openAICreateSpy.mock.calls[0][0];
+    const systemMessage = createArgs.messages.find( (m: any) => m.role === 'system');
+    expect(systemMessage).toBeDefined();
+    const systemMessageString = Array.isArray(systemMessage!.content) ? systemMessage!.content.join(' ') : systemMessage!.content as string;
+    
+    expect(systemMessageString).toContain('Here is the current folder structure');
+    // Based on scanDir logic and maxDepth = 2 (from FOLDER_HINT_MAX_DEPTH)
+    // Root (depth 0), src (depth 1), components (depth 2)
+    // Files under components (Button.tsx) will be at depth 3 from root of scanDir, but depth 2 from 'src'
+    // scanDir(rootDir, maxDepth=2, currentDepth=0)
+    //  scanDir(src, maxDepth=2, currentDepth=1)
+    //   scanDir(components, maxDepth=2, currentDepth=2) -> Button.tsx
+    const expectedHint = 
+`Project folder structure (up to 2 levels deep):
+/
+|-- src/
+|   |-- myFile.ts
+|   \`-- components/
+|       \`-- Button.tsx 
+\`-- package.json
+`; 
+    // Normalize whitespace for robust comparison
+    const normalize = (str: string) => str.replace(/\s+/g, ' ').replace(/(\r\n|\n|\r)/gm," ").trim();
+    expect(normalize(systemMessageString)).toContain(normalize(expectedHint.substring(expectedHint.indexOf("Project folder structure"))));
+
+
+    expect(systemMessageString).not.toContain('node_modules');
+    expect(systemMessageString).not.toContain('.git');
+  });
+
+  it('should NOT include folder structure hint if getFolderStructureHint returns empty due to root error', async () => {
+    readdirSyncSpy = jest.spyOn(fsSync, 'readdirSync');
+    readdirSyncSpy.mockImplementation((dirPath: fsSync.PathLike) => {
+        if (dirPath.toString() === '/test/project/root') {
+            throw new Error('Simulated readdir error at root');
+        }
+        return [];
+    });
+
+    await parser.determineFilePath("console.log('another test snippet');");
+
+    expect(openAICreateSpy).toHaveBeenCalled();
+    const createArgs = openAICreateSpy.mock.calls[0][0];
+    const systemMessage = createArgs.messages.find( (m: any) => m.role === 'system');
+    expect(systemMessage).toBeDefined();
+    const systemMessageString = Array.isArray(systemMessage!.content) ? systemMessage!.content.join(' ') : systemMessage!.content as string;
+    
+    expect(systemMessageString).not.toContain('Here is the current folder structure');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('Error generating folder structure hint: Simulated readdir error at root'));
+  });
+
+   it('should respect FOLDER_HINT_MAX_DEPTH for folder hint (e.g., depth 0)', async () => {
+    const mockProjectRoot = '/test/project/root';
+    ((parser as any).FOLDER_HINT_MAX_DEPTH) = 0; // Set maxDepth to 0 for this test
+
+    readdirSyncSpy = jest.spyOn(fsSync, 'readdirSync');
+    readdirSyncSpy.mockImplementation((dirPath: fsSync.PathLike) => {
+      const currentPath = dirPath.toString();
+      if (currentPath === mockProjectRoot) { // Only this call should happen for maxDepth 0
+        return [
+          { name: 'src', isDirectory: () => true, isFile: () => false } as fsSync.Dirent,
+          { name: 'package.json', isDirectory: () => false, isFile: () => true } as fsSync.Dirent,
+        ];
+      }
+      // Should not be called for /test/project/root/src if maxDepth is 0 for getFolderStructureHint
+      // (which means scanDir is called with maxDepth 0, so it only lists root entries)
+      return []; 
+    });
+
+    await parser.determineFilePath("console.log('depth 0 test');");
+    
+    expect(openAICreateSpy).toHaveBeenCalled();
+    const createArgs = openAICreateSpy.mock.calls[0][0];
+    const systemMessage = createArgs.messages.find( (m: any) => m.role === 'system');
+    expect(systemMessage).toBeDefined();
+    const systemMessageString = Array.isArray(systemMessage!.content) ? systemMessage!.content.join(' ') : systemMessage!.content as string;
+
+    expect(systemMessageString).toContain('Project folder structure (up to 0 levels deep):');
+    expect(systemMessageString).toContain('|-- src/');
+    expect(systemMessageString).toContain('`-- package.json');
+    expect(systemMessageString).not.toContain('myFile.ts'); // Should not be visible at depth 0
+    expect(systemMessageString).not.toContain('components/');
   });
 });
