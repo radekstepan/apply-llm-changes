@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { marked } from 'marked';
+import { getDirectoryStructure } from './utils';
 
 // --- Configuration and Setup ---
 
@@ -31,8 +32,8 @@ function findPackageRoot(startDir: string): string {
 
 // Check for .env in the current working directory first, then fallback to package root
 let envPath = path.join(process.cwd(), '.env');
+const packageRoot = findPackageRoot(__dirname); // Ensure packageRoot is defined here for access in extractAllCodeBlocks
 if (!fs.existsSync(envPath)) {
-  const packageRoot = findPackageRoot(__dirname);
   envPath = path.join(packageRoot, '.env');
 }
 dotenv.config({ path: envPath });
@@ -56,6 +57,7 @@ if (apiKey && baseURL) {
 
 // --- Types ---
 
+export { client }; // Export for testing purposes
 export type FileData = { content: string; format: string };
 export type FilesMap = Map<string, FileData>; // Map<filePath, FileData>
 
@@ -99,9 +101,13 @@ function normalizeAndValidatePath(
 /**
  * Uses the configured LLM to determine a relative file path for a given code snippet.
  * @param snippet The code snippet (potentially with surrounding context).
+ * @param directoryStructure Optional array of known directory paths to hint the LLM.
  * @returns A promise resolving to the determined relative file path (using forward slashes) or 'NO_PATH' if unable to determine or an error occurs.
  */
-export async function determineFilePath(snippet: string): Promise<string> {
+export async function determineFilePath(
+  snippet: string,
+  directoryStructure?: string[]
+): Promise<string> {
   if (!client) {
     // Log error but return NO_PATH to allow processing of <file> tags
     console.error(
@@ -117,20 +123,27 @@ export async function determineFilePath(snippet: string): Promise<string> {
   );
 
   try {
+    let systemMessageContent = [
+      'You are an assistant that assigns the full relative file path to a code snippet.',
+      'Analyze the snippet content and any surrounding context provided.',
+      'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js) based on common project structures, comments, or import statements within the snippet.',
+      'Ensure the path is relative to a project root and uses forward slashes (/).',
+      'Do not include absolute paths (e.g., /home/user/...) or URLs.',
+      'If you cannot confidently determine a reasonable file path for the snippet, respond with exactly the string NO_PATH.',
+      'Do not add any explanation, preamble, or markdown formatting to your response. Respond only with the path or NO_PATH.',
+    ].join(' ');
+
+    if (directoryStructure && directoryStructure.length > 0) {
+      const hint = `Hint: The project has the following directory structure (use this to help determine the file path):\n- ${directoryStructure.join('\n- ')}`;
+      systemMessageContent = `${hint}\n\n${systemMessageContent}`;
+    }
+
     const resp = await client.chat.completions.create({
       model,
       messages: [
         {
           role: 'system',
-          content: [
-            'You are an assistant that assigns the full relative file path to a code snippet.',
-            'Analyze the snippet content and any surrounding context provided.',
-            'Determine the most likely full relative file path (e.g., src/components/Button.tsx, packages/utils/src/helpers.js) based on common project structures, comments, or import statements within the snippet.',
-            'Ensure the path is relative to a project root and uses forward slashes (/).',
-            'Do not include absolute paths (e.g., /home/user/...) or URLs.',
-            'If you cannot confidently determine a reasonable file path for the snippet, respond with exactly the string NO_PATH.',
-            'Do not add any explanation, preamble, or markdown formatting to your response. Respond only with the path or NO_PATH.',
-          ].join(' '),
+          content: systemMessageContent,
         },
         {
           role: 'user',
@@ -187,6 +200,20 @@ export async function determineFilePath(snippet: string): Promise<string> {
 export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
   const filesToWrite: FilesMap = new Map();
   let remainingInput = input;
+
+  let directoryStructure: string[] = [];
+  try {
+    // packageRoot is defined in the outer scope of this file
+    directoryStructure = await getDirectoryStructure(packageRoot);
+    console.log(
+      `Successfully fetched directory structure with ${directoryStructure.length} entries.`
+    );
+  } catch (error: any) {
+    console.warn(
+      `Failed to get directory structure: ${error.message}. Proceeding without it.`
+    );
+    // directoryStructure is already initialized to [], so no need to re-assign on error.
+  }
 
   console.log('Step 1: Pre-processing for explicit <file> tags...');
 
@@ -260,7 +287,10 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
       let llmFilePath: string;
       try {
         // Ask LLM to determine the path for the trimmed snippet
-        llmFilePath = await determineFilePath(snippetTrimmed);
+        llmFilePath = await determineFilePath(
+          snippetTrimmed,
+          directoryStructure
+        );
       } catch (err: any) {
         console.error(
           `Skipping markdown block #${codeBlockCount} due to LLM error: ${

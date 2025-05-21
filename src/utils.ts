@@ -1,3 +1,6 @@
+import * as fsAsync from 'fs/promises';
+import * as path from 'path';
+
 /**
  * Strips JavaScript-style comments (single-line and multi-line) from a JSON string.
  * It then attempts to parse and re-stringify the JSON to ensure it's valid and
@@ -81,4 +84,61 @@ export function stripOuterMarkdownFences(content: string): string {
   }
   // If not a block that itself is wrapped in fences, return original content
   return content;
+}
+
+/**
+ * Recursively scans a directory and returns a list of relative directory paths.
+ *
+ * @param baseDir The absolute path to the base directory to scan.
+ * @returns A Promise that resolves to an array of relative directory paths.
+ *          Paths use forward slashes.
+ */
+export async function getDirectoryStructure(
+  baseDir: string
+): Promise<string[]> {
+  const results: string[] = [];
+  const ignoredDirs = new Set(['node_modules', '.git', 'dist', 'build']);
+
+  async function scanDir(currentPath: string) {
+    let entries;
+    try {
+      entries = await fsAsync.readdir(currentPath, { withFileTypes: true });
+    } catch (error: any) {
+      console.warn(
+        `Warning: Could not read directory ${currentPath}. Error: ${error.message}. Skipping.`
+      );
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const dirName = entry.name;
+        const fullPath = path.join(currentPath, dirName);
+
+        // Check if directory should be ignored
+        if (ignoredDirs.has(dirName) || dirName.startsWith('.')) {
+          continue;
+        }
+
+        // Calculate relative path and normalize to forward slashes
+        const relativePath = path
+          .relative(baseDir, fullPath)
+          .replace(/\\/g, '/');
+
+        // Add to results if it's not an empty string (which can happen for baseDir itself if we decide to include it)
+        // For this implementation, we only add subdirectories.
+        if (relativePath) {
+          results.push(relativePath);
+        }
+        await scanDir(fullPath); // Recursive call
+      }
+    }
+  }
+
+  // Start scanning from the base directory itself.
+  // We also need to consider if the baseDir itself should be scanned for subdirectories,
+  // but not added to the results as an empty string.
+  // The first call to scanDir will handle its children.
+  await scanDir(baseDir);
+  return results;
 }

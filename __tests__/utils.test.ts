@@ -1,251 +1,281 @@
-// __tests__/utils.test.ts
-import { stripJsonComments, stripOuterMarkdownFences } from '../src/utils';
+import mock from 'mock-fs';
+import { getDirectoryStructure } from '../src/utils';
+import path from 'path';
 
-describe('stripJsonComments', () => {
-  it('should remove single-line comments and reformat', () => {
-    const jsonWithComments = `{
-      // comment
-      "key": "value", // another comment
-      "anotherKey": "anotherValue"
-    }`;
-    const expectedJson = `{
-  "key": "value",
-  "anotherKey": "anotherValue"
-}`;
-    expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
-  });
+// Mock the 'fs/promises' module
+jest.mock('fs/promises');
 
-  it('should remove multi-line comments and reformat', () => {
-    const jsonWithComments = `{
-      /* multi-line
-         comment */
-      "key": "value"
-    }`;
-    const expectedJson = `{
-  "key": "value"
-}`;
-    expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
-  });
+// Import the mocked fsPromises AFTER jest.mock has been called
+import * as fsPromises from 'fs/promises';
 
-  it('should handle mixed comments and reformat JSON', () => {
-    const jsonWithComments = `{
-      // This is a top-level comment
-      "name": "My Application", // Name of the app
-      "version": "1.0.0",
-      /*
-       * Multi-line comment
-       * for configuration details.
-       */
-      "config": {
-        "host": "localhost", // Default host
-        "port": 8080,
-        "api_key": "keep//this/string/with/slashes"
-      },
-      "features": [
-        "feature1", // enabled
-        "feature2"  /* disabled temporarily */
-      ],
-      // "debug_mode": true, // This whole line (key and value) should be removed
-      "empty_lines_will_be_handled": null
-    }`;
-    const expectedJson = `{
-  "name": "My Application",
-  "version": "1.0.0",
-  "config": {
-    "host": "localhost",
-    "port": 8080,
-    "api_key": "keep//this/string/with/slashes"
-  },
-  "features": [
-    "feature1",
-    "feature2"
-  ],
-  "empty_lines_will_be_handled": null
-}`;
-    expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
-  });
+// Helper to get a reference to the actual fs/promises for fallback
+const actualFsPromises = jest.requireActual('fs/promises');
 
-  it('should not remove slashes inside strings', () => {
-    const jsonWithComments = `{
-      "url": "http://example.com", // a URL
-      "path": "file:///c:/path/to/file"
-    }`;
-    const expectedJson = `{
-  "url": "http://example.com",
-  "path": "file:///c:/path/to/file"
-}`;
-    expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
-  });
+// Helper to create absolute paths for mock-fs
+const base = path.resolve('project');
 
-  it('should return cleaned raw stripped string if JSON is invalid after stripping', () => {
-    const invalidJsonFragment = `"key": "value" // comment`; // Not a full valid JSON object
-    const expectedOutput = `"key": "value"`;
-    // Suppress console.warn during this specific test
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    expect(stripJsonComments(invalidJsonFragment)).toBe(expectedOutput);
-    consoleWarnSpy.mockRestore();
-  });
+describe('getDirectoryStructure', () => {
+  let consoleWarnSpy: jest.SpyInstance;
 
-  it('should handle empty input string', () => {
-    // Suppress console.warn during this specific test
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    expect(stripJsonComments('')).toBe('');
-    consoleWarnSpy.mockRestore();
-  });
-
-  it('should handle JSON with only comments, resulting in empty object', () => {
-    const jsonWithOnlyComments = `{
-      // line 1
-      /* block 1 */
-      // line 2
-    }`;
-    // After stripping, the content should parse to an empty object {}.
-    // We then expect it to be stringified using the environment's default
-    // pretty-printing for an empty object (e.g., JSON.stringify({}, null, 2)).
-    // Standard Node.js produces "{\n}", but if the environment differs, this test will adapt.
-    const expectedOutputForEmptyObject = JSON.stringify({}, null, 2);
-    expect(stripJsonComments(jsonWithOnlyComments)).toBe(
-      expectedOutputForEmptyObject
+  beforeEach(() => {
+    // Spy on console.warn to check for error logging
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // Reset all mocks before each test, including fsPromises
+    jest.clearAllMocks();
+    // Configure the mock for fsPromises.readdir to use actualFsPromises.readdir by default for most tests
+    // Specific tests can override this.
+    (fsPromises.readdir as jest.Mock).mockImplementation(
+      actualFsPromises.readdir
     );
   });
 
-  it('should handle JSON with only comments (no braces), resulting in empty string', () => {
-    const jsonWithOnlyComments = `
-      // line 1
-      /* block 1 */
-      // line 2
-    `;
-    // After stripping, it becomes "\n\n\n", which fails to parse as JSON.
-    // The fallback cleans it to an empty string.
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    expect(stripJsonComments(jsonWithOnlyComments)).toBe('');
+  afterEach(() => {
+    mock.restore(); // Restore the real file system
     consoleWarnSpy.mockRestore();
   });
 
-  it('should handle already comment-free JSON and reformat it', () => {
-    const jsonNoComments = `{"key":"value","array":[1,2],"nested":{"sub":"val"}}`;
-    const expectedFormattedJson = `{
-  "key": "value",
-  "array": [
-    1,
-    2
-  ],
-  "nested": {
-    "sub": "val"
-  }
-}`;
-    expect(stripJsonComments(jsonNoComments)).toBe(expectedFormattedJson);
+  it('should return a basic directory structure', async () => {
+    mock({
+      [base]: {
+        src: {
+          components: {},
+          services: {},
+        },
+        docs: {},
+        public: {},
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'src',
+        'src/components',
+        'src/services',
+        'docs',
+        'public',
+      ])
+    );
+    expect(result.length).toBe(5);
   });
 
-  it('should preserve boolean and null values correctly', () => {
-    const jsonWithComments = `{
-      "active": true, // active status
-      "optional": null, /* can be null */
-      "valid": false
-    }`;
-    const expectedJson = `{
-  "active": true,
-  "optional": null,
-  "valid": false
-}`;
-    expect(stripJsonComments(jsonWithComments)).toBe(expectedJson);
-  });
-});
-
-describe('stripOuterMarkdownFences', () => {
-  it('should strip basic double fences (content is a markdown block)', () => {
-    const input = '```tsx\nconst a = 1;\n```';
-    const expected = 'const a = 1;';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
-
-  it('should strip double fences with language specifier (content is a markdown block)', () => {
-    const input = '```javascript\nconsole.log("hello");\n```';
-    const expected = 'console.log("hello");';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  it('should ignore standard excluded directories (node_modules, .git, dist, build)', async () => {
+    mock({
+      [base]: {
+        src: {},
+        node_modules: { some_package: {} },
+        '.git': { HEAD: '' },
+        dist: { 'main.js': '' },
+        build: { output: {} },
+        packages: {
+          core: {},
+          node_modules: {}, // nested node_modules
+        },
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(
+      expect.arrayContaining(['src', 'packages', 'packages/core'])
+    );
+    expect(result).not.toContain(expect.stringMatching(/node_modules/));
+    expect(result).not.toContain(expect.stringMatching(/\.git/));
+    expect(result).not.toContain(expect.stringMatching(/dist/));
+    expect(result).not.toContain(expect.stringMatching(/build/));
+    expect(result.length).toBe(3);
   });
 
-  it('should strip double fences with extra newlines inside and trim result (content is a markdown block with surrounding newlines)', () => {
-    const input = '```text\n\nInner content.\n\n```'; // Inner content has blank lines around it
-    const expected = 'Inner content.';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  it('should ignore hidden directories (names starting with a dot)', async () => {
+    mock({
+      [base]: {
+        src: {},
+        '.vscode': { settings: '' },
+        '.secrets': { 'key.pem': '' },
+        app: {
+          '.config': {},
+          main: {},
+        },
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(expect.arrayContaining(['src', 'app', 'app/main']));
+    expect(result).not.toContain(expect.stringMatching(/\.vscode/));
+    expect(result).not.toContain(expect.stringMatching(/\.secrets/));
+    expect(result).not.toContain(expect.stringMatching(/\.config/)); // This was correct
+    expect(result.length).toBe(3);
   });
 
-  it('should handle double fences where content is just newlines, resulting in empty string', () => {
-    const input = '```\n\n```'; // Inner content is one blank line
-    const expected = ''; // After stripping outer fences and inner blank line
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  it('should ensure all paths are relative to baseDir and use forward slashes', async () => {
+    mock({
+      [path.join(base, 'parent', 'child')]: {},
+      [path.join(base, 'another', 'deep', 'dir')]: {},
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'parent',
+        'parent/child',
+        'another',
+        'another/deep',
+        'another/deep/dir',
+      ])
+    );
+    result.forEach((p) => {
+      expect(p).not.toContain('\\');
+      expect(path.isAbsolute(p)).toBe(false);
+    });
   });
 
-  it('should handle double fences where content is effectively empty, resulting in empty string', () => {
-    const input = '```\n```'; // No actual content lines between fences
-    const expected = '';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
+  it('should include empty directories if not otherwise ignored', async () => {
+    mock({
+      [base]: {
+        empty_dir1: {},
+        src: {
+          empty_too: {},
+          not_empty: { 'file.txt': 'content' },
+        },
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'empty_dir1',
+        'src',
+        'src/empty_too',
+        'src/not_empty',
+      ])
+    );
+    expect(result.length).toBe(4);
   });
 
-  it('should not strip if not a double fence (only start)', () => {
-    const input = '```typescript\nconst b = 2;\n```\nSome other text.';
-    expect(stripOuterMarkdownFences(input)).toBe(input);
+  it('should correctly list deeply nested structures', async () => {
+    mock({
+      [base]: {
+        a: {
+          b: {
+            c: {
+              d: {},
+            },
+            e: {},
+          },
+          f: {},
+        },
+        g: {},
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'a',
+        'a/b',
+        'a/b/c',
+        'a/b/c/d',
+        'a/b/e',
+        'a/f',
+        'g',
+      ])
+    );
+    expect(result.length).toBe(7);
   });
 
-  it('should not strip if not a double fence (only end)', () => {
-    const input = 'Some text.\n```\nconst c = 3;\n```';
-    expect(stripOuterMarkdownFences(input)).toBe(input);
+  it('should return an empty array when baseDir has no subdirectories (only files)', async () => {
+    mock({
+      [base]: {
+        'file.txt': 'content',
+      },
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual([]);
   });
 
-  it('should not strip if no fences are present (plain text)', () => {
-    const input = 'Just regular text.';
-    expect(stripOuterMarkdownFences(input)).toBe(input);
+  it('should return an empty array when baseDir itself is empty', async () => {
+    mock({
+      [base]: {},
+    });
+    const result = await getDirectoryStructure(base);
+    expect(result).toEqual([]);
   });
 
-  it('should not strip content that is too short to be a fenced block (e.g. just one line fence)', () => {
-    const input = '```tsx';
-    expect(stripOuterMarkdownFences(input)).toBe(input);
+  it('should log a warning and skip problematic directories (generic error)', async () => {
+    mock({
+      [base]: {
+        good_dir: {},
+        problem_dir: { 'child_of_problem.txt': 'content' }, // Added a child to ensure it's not listed
+        another_dir: {
+          child: {},
+        },
+      },
+    });
+
+    (fsPromises.readdir as jest.Mock).mockImplementation(
+      async (p: fsPromises.PathLike, options) => {
+        if (p === path.join(base, 'problem_dir')) {
+          throw new Error('Test error reading problem_dir');
+        }
+        return actualFsPromises.readdir(p, options);
+      }
+    );
+
+    const result = await getDirectoryStructure(base);
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `Warning: Could not read directory ${path.join(base, 'problem_dir')}. Error: Test error reading problem_dir. Skipping.`
+      )
+    );
+    // problem_dir itself will be listed because its parent (base) is readable.
+    // However, its children (e.g., problem_dir/child_of_problem.txt) will not be.
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'good_dir',
+        'problem_dir',
+        'another_dir',
+        'another_dir/child',
+      ])
+    );
+    expect(result).not.toContain('problem_dir/child_of_problem.txt'); // Verify child is not listed
+    expect(result.length).toBe(4);
   });
 
-  it('should not strip empty string', () => {
-    const input = '';
-    expect(stripOuterMarkdownFences(input)).toBe(input);
-  });
+  it('should handle permission errors (EACCES) when reading a directory', async () => {
+    mock({
+      [base]: {
+        accessible_dir: {},
+        restricted_dir: { 'child_of_restricted.txt': 'content' }, // Added a child
+        another_accessible_dir: {
+          sub_dir: {},
+        },
+      },
+    });
 
-  it('should handle opening fence with trailing spaces', () => {
-    const input = '```tsx  \n// code\n```';
-    const expected = '// code';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
+    (fsPromises.readdir as jest.Mock).mockImplementation(
+      async (p: fsPromises.PathLike, options) => {
+        if (p === path.join(base, 'restricted_dir')) {
+          const error = new Error(
+            'Simulated EACCES error'
+          ) as NodeJS.ErrnoException;
+          error.code = 'EACCES';
+          throw error;
+        }
+        return actualFsPromises.readdir(p, options);
+      }
+    );
 
-  // This test's name and expectation are updated.
-  // It tests the case where the `content` given to the function
-  // IS a markdown block itself (which happens in a double-wrapped scenario).
-  it('should strip content that is itself a complete markdown code block', () => {
-    const input =
-      '```typescript\n// This is a normal code block\nfunction test() {}\n```';
-    const expected = '// This is a normal code block\nfunction test() {}';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
+    const result = await getDirectoryStructure(base);
 
-  // This test should now pass with the improved trimming logic.
-  it('should correctly strip content with internal leading/trailing spaces on lines but preserve them', () => {
-    const input = '```\n  Indented line 1\n  Indented line 2\n```';
-    const expected = '  Indented line 1\n  Indented line 2';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
-
-  it('should strip fences with hyphens or dots in language', () => {
-    const input = '```objective-c.old\n// code\n```';
-    const expected = '// code';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
-
-  it('should strip fences when first line is just ``` (no language)', () => {
-    const input = '```\ncontent\n```';
-    const expected = 'content';
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
-  });
-
-  it('should handle content with only spaces between fences', () => {
-    const input = '```\n  \n```'; // Inner content is a line with only spaces
-    const expected = ''; // Should become empty after trimming blank lines
-    expect(stripOuterMarkdownFences(input)).toBe(expected);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `Warning: Could not read directory ${path.join(base, 'restricted_dir')}. Error: Simulated EACCES error. Skipping.`
+      )
+    );
+    // restricted_dir itself will be listed. Its children will not.
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'accessible_dir',
+        'restricted_dir',
+        'another_accessible_dir',
+        'another_accessible_dir/sub_dir',
+      ])
+    );
+    expect(result).not.toContain('restricted_dir/child_of_restricted.txt');
+    expect(result.length).toBe(4);
   });
 });
