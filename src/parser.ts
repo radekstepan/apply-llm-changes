@@ -44,6 +44,24 @@ const apiKey = rawKey && process.env[rawKey] ? process.env[rawKey] : rawKey;
 const baseURL = process.env.LLM_API_BASE_URL;
 const model = process.env.LLM_MODEL || 'gpt-4.1-mini-2025-04-14'; // Default model
 
+// Read and parse LLM_TEMPERATURE from environment, with a default
+const defaultTemperature = 0.1;
+let llmTemperature = defaultTemperature;
+const envTemp = process.env.LLM_TEMPERATURE;
+if (envTemp) {
+  const parsedTemp = parseFloat(envTemp);
+  if (!isNaN(parsedTemp) && parsedTemp >= 0 && parsedTemp <= 2) {
+    llmTemperature = parsedTemp;
+    console.log(`Using LLM temperature from environment: ${llmTemperature}`);
+  } else {
+    console.warn(
+      `Invalid LLM_TEMPERATURE value "${envTemp}". Must be a number between 0 and 2. Using default: ${defaultTemperature}`
+    );
+  }
+} else {
+  console.log(`LLM_TEMPERATURE not set. Using default: ${defaultTemperature}`);
+}
+
 let client: OpenAI | null = null;
 if (apiKey && baseURL) {
   client = new OpenAI({ apiKey, baseURL });
@@ -112,7 +130,7 @@ export async function determineFilePath(snippet: string): Promise<string> {
 
   console.log(
     `Determining file path via LLM for snippet starting with: "${snippet
-      .substring(0, 50)
+      .substring(0, 80) // Increased substring length for better logging
       .replace(/\n/g, '\\n')}..."`
   );
 
@@ -134,10 +152,14 @@ export async function determineFilePath(snippet: string): Promise<string> {
         },
         {
           role: 'user',
+          // The snippet provided might now be a multi-line context including
+          // lines before the code block, the opening fence, and first few lines of code.
+          // Wrapping it in ``` ensures it's treated as a single block by the LLM,
+          // even if the snippet itself contains ```.
           content: `Assign a file path to the following code snippet:\n\n\`\`\`\n${snippet}\n\`\`\``,
         },
       ],
-      temperature: 0.1, // Low temperature for deterministic path finding
+      temperature: llmTemperature, // Use configured temperature
     });
 
     const choice = resp.choices?.[0];
@@ -178,7 +200,7 @@ export async function determineFilePath(snippet: string): Promise<string> {
 
 /**
  * Extracts file paths and content from input text.
- * Handles explicit  tags first.
+ * Handles explicit <file> tags first.
  * Then, uses an LLM to determine paths for standard markdown code blocks.
  * Explicit tags take precedence over LLM-determined paths for the same file.
  * @param input The raw input string containing potential file blocks.
@@ -190,7 +212,7 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
 
   console.log('Step 1: Pre-processing for explicit <file> tags...');
 
-  // Regex to find  blocks
+  // Regex to find <file> blocks
   // Captures: 1=quote type, 2=path, 3=content
   const fileTagRegex = /<file\s+path=(["'])(.*?)\1>([\s\S]*?)<\/file>/g;
 
@@ -234,6 +256,7 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
   // Process the input *after* <file> tags have been removed
   const tokens = marked.lexer(remainingInput);
   let codeBlockCount = 0;
+  let currentSearchIndexInRemainingInput = 0; // Tracks position in remainingInput for indexOf
 
   console.log(
     `Iterating through ${tokens.length} marked tokens for code blocks...`
@@ -244,23 +267,64 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
     if (token.type === 'code') {
       codeBlockCount++;
 
-      const snippetRaw = token.text ?? ''; // Use original content for writing
-      const lang = token.lang || 'unknown';
-      const snippetTrimmed = snippetRaw.trim(); // Use trimmed for LLM analysis
+      const rawMarkdownForBlock = token.raw; // Full markdown of the block, e.g., "```ts\ncode\n```"
+      const codeContentOnly = token.text ?? ''; // Just the code, e.g., "code"
 
-      if (!snippetTrimmed) {
+      if (!codeContentOnly.trim()) {
         console.log(`Skipping empty markdown code block #${codeBlockCount}.`);
         continue; // Skip empty blocks
       }
 
-      console.log(
-        `Processing markdown code block #${codeBlockCount} (lang: ${lang}, length: ${snippetRaw.length}). Calling LLM...`
+      let contextForLLM: string;
+      // Find the start of this specific token.raw in the remainingInput string.
+      // currentSearchIndexInRemainingInput ensures we find the current block, not an earlier identical one.
+      const blockStartIndex = remainingInput.indexOf(
+        rawMarkdownForBlock,
+        currentSearchIndexInRemainingInput
       );
+
+      if (blockStartIndex === -1) {
+        console.warn(
+          `Could not robustly locate markdown block #${codeBlockCount} in the input to extract full context. Sending only code content to LLM.`
+        );
+        // Fallback: send only the code content (trimmed), similar to previous behavior.
+        contextForLLM = codeContentOnly.trim();
+      } else {
+        // Extract text before this code block token.
+        const textBeforeBlock = remainingInput.substring(0, blockStartIndex);
+        const linesBeforeBlock = textBeforeBlock.split('\n');
+        // Get the last 4 lines from the text before the block.
+        // slice(-4) correctly handles cases where there are fewer than 4 lines.
+        const fourLinesBeforeText = linesBeforeBlock.slice(-4);
+
+        // Split the raw markdown of the block into lines.
+        const blockLines = rawMarkdownForBlock.split('\n');
+        const openingBackticksLine = blockLines[0]; // First line is the opening fence, e.g., "```typescript"
+        // Get up to 2 lines of code immediately following the opening fence.
+        // blockLines.slice(1, 3) gets elements at index 1, 2.
+        const twoLinesOfCodeAfterFence = blockLines.slice(1, 3);
+
+        contextForLLM = [
+          ...fourLinesBeforeText,
+          openingBackticksLine,
+          ...twoLinesOfCodeAfterFence,
+        ].join('\n');
+
+        // Advance the search index for the next iteration to search *after* the current block.
+        currentSearchIndexInRemainingInput =
+          blockStartIndex + rawMarkdownForBlock.length;
+      }
+
+      console.log(
+        `Processing markdown code block #${codeBlockCount} (lang: ${token.lang || 'unknown'}, length: ${rawMarkdownForBlock.length}).`
+      );
+      // For debugging, one might log the context being sent. Be mindful of log verbosity.
+      // console.log(`Context for LLM (block #${codeBlockCount}):\n---\n${contextForLLM.substring(0, 200).replace(/\n/g, '\\n')}\n---`);
 
       let llmFilePath: string;
       try {
-        // Ask LLM to determine the path for the trimmed snippet
-        llmFilePath = await determineFilePath(snippetTrimmed);
+        // Pass the new contextForLLM (or fallback) to determineFilePath
+        llmFilePath = await determineFilePath(contextForLLM);
       } catch (err: any) {
         console.error(
           `Skipping markdown block #${codeBlockCount} due to LLM error: ${
@@ -297,10 +361,10 @@ export async function extractAllCodeBlocks(input: string): Promise<FilesMap> {
         }
       }
 
-      // Store the original, *untrimmed* content from the markdown block
+      // Store the original, *untrimmed* code content from the markdown block (token.text)
       filesToWrite.set(llmFilePath, {
-        content: snippetRaw,
-        format: `markdown code block (lang: ${lang})`,
+        content: codeContentOnly,
+        format: `markdown code block (lang: ${token.lang || 'unknown'})`,
       });
     } // End if (token.type === 'code')
   } // End loop through tokens
