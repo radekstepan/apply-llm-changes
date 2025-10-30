@@ -8,18 +8,11 @@ const fs = require('fs');
 // Determine the directory where changes are being applied (current working directory)
 const workingDirectory = process.cwd();
 
-// Check if .infisical.json exists in the working directory
+// Check if .infisical.json exists only in the working directory
 const infisicalCheck = () => {
   const infisicalPath = path.join(workingDirectory, '.infisical.json');
   if (fs.existsSync(infisicalPath)) {
     return { exists: true, path: infisicalPath, dir: workingDirectory };
-  }
-
-  // If not in working directory, use project root as fallback
-  const projectRoot = path.resolve(__dirname, '..');
-  const projectInfisicalPath = path.join(projectRoot, '.infisical.json');
-  if (fs.existsSync(projectInfisicalPath)) {
-    return { exists: true, path: projectInfisicalPath, dir: projectRoot };
   }
 
   return { exists: false };

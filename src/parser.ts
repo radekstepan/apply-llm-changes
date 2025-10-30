@@ -29,12 +29,9 @@ function findPackageRoot(startDir: string): string {
   return process.cwd(); // Fallback
 }
 
-// Check for .env in the current working directory first, then fallback to package root
-let envPath = path.join(process.cwd(), '.env');
-if (!fs.existsSync(envPath)) {
-  const packageRoot = findPackageRoot(__dirname);
-  envPath = path.join(packageRoot, '.env');
-}
+// Always load .env from the package root (where the tool is installed)
+const packageRoot = findPackageRoot(__dirname);
+const envPath = path.join(packageRoot, '.env');
 dotenv.config({ path: envPath });
 
 // Initialize LLM client using environment variables
@@ -121,8 +118,8 @@ function normalizeAndValidatePath(
  */
 export async function determineFilePath(snippet: string): Promise<string> {
   if (!client) {
-    // Log error but return NO_PATH to allow processing of <file> tags
-    console.error(
+    // Log warning and return NO_PATH to allow processing of <file> tags
+    console.warn(
       'LLM client not initialized. Cannot determine path for markdown block.'
     );
     return 'NO_PATH';

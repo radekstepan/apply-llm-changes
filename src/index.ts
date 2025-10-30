@@ -34,12 +34,9 @@ function findPackageRoot(startDir: string): string {
   return process.cwd();
 }
 
-// Check for .env in the current working directory first, then fallback to package root
-let envPath = path.join(process.cwd(), '.env');
-if (!fs.existsSync(envPath)) {
-  const packageRoot = findPackageRoot(__dirname);
-  envPath = path.join(packageRoot, '.env');
-}
+// Always load .env from the package root (where the tool is installed)
+const packageRoot = findPackageRoot(__dirname);
+const envPath = path.join(packageRoot, '.env');
 dotenv.config({ path: envPath });
 
 /**
