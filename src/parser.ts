@@ -41,9 +41,8 @@ const apiKey = rawKey && process.env[rawKey] ? process.env[rawKey] : rawKey;
 const baseURL = process.env.LLM_API_BASE_URL;
 const model = process.env.LLM_MODEL || 'gpt-4.1-mini-2025-04-14'; // Default model
 
-// Read and parse LLM_TEMPERATURE from environment, with a default
-const defaultTemperature = 0.1;
-let llmTemperature = defaultTemperature;
+// Read and parse LLM_TEMPERATURE from environment
+let llmTemperature: number | undefined = undefined;
 const envTemp = process.env.LLM_TEMPERATURE;
 if (envTemp) {
   const parsedTemp = parseFloat(envTemp);
@@ -51,12 +50,16 @@ if (envTemp) {
     llmTemperature = parsedTemp;
     console.log(`Using LLM temperature from environment: ${llmTemperature}`);
   } else {
+    const defaultTemperature = 0.1;
+    llmTemperature = defaultTemperature;
     console.warn(
       `Invalid LLM_TEMPERATURE value "${envTemp}". Must be a number between 0 and 2. Using default: ${defaultTemperature}`
     );
   }
 } else {
-  console.log(`LLM_TEMPERATURE not set. Using default: ${defaultTemperature}`);
+  console.log(
+    `LLM_TEMPERATURE not set. Temperature will not be passed to LLM.`
+  );
 }
 
 let client: OpenAI | null = null;
@@ -156,7 +159,7 @@ export async function determineFilePath(snippet: string): Promise<string> {
           content: `Assign a file path to the following code snippet:\n\n\`\`\`\n${snippet}\n\`\`\``,
         },
       ],
-      temperature: llmTemperature, // Use configured temperature
+      ...(llmTemperature !== undefined ? { temperature: llmTemperature } : {}),
     });
 
     const choice = resp.choices?.[0];
